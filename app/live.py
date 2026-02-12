@@ -8,7 +8,7 @@ import pandas as pd
 from brokers.base import OrderSide
 from brokers.ibkr import IBKRBroker, IBKRSettings
 from config.settings import Settings
-from strategies.momentum import MomentumParams, decide_target_position
+from strategies.momentum_example import MomentumParams, decide_target_position
 
 
 def _position_for_symbol(positions: dict, symbol: str) -> int:

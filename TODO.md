@@ -14,3 +14,5 @@ Future Additions:
 
     - You know now that I am thinking about it, do you think that it would be better to have a main.py with 
      filters for either live or backtest? And just have src (and then later api folder) in app as well as main.py? 
+
+4. Add an example branch that would show an example of how to use the template

@@ -9,7 +9,7 @@ import pandas as pd
 from backtest.event_driven import BacktestResult, run_event_driven_bar_backtest
 from config.settings import Settings
 from data.paths import ensure_artifact_run_dir
-from strategies.momentum import MomentumParams, decide_target_position
+from strategies.momentum_example import MomentumParams, decide_target_position
 from utils.run_id import new_run_id
 
 

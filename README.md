@@ -23,7 +23,7 @@ uv run python app/backtest.py --source ibkr --symbol ASML --contract-id 11790284
 - Put strategy logic in `src/strategies/<your_strategy>.py`.
 - Follow the convention: export `Params` (dataclass) and `decide_target_position(ohlc, position, p)`.
 - Copy `app/backtest.py` to `app/<your_strategy>_backtest.py`.
-- Change the strategy import in that new app script from `strategies.momentum` to your strategy module.
+- Change the strategy import in that new app script from `strategies.momentum_example` to your strategy module.
 
 ### Layout
 

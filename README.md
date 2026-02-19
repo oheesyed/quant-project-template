@@ -1,42 +1,48 @@
-## quant-project-template
+# quant-strategy-app template
 
-Quant project template skeleton for:
+Strategy-agnostic template for building a quant strategy project with one CLI and separate
+backtest/live runners.
 
-- research + strategy iteration (`/playground`, `/docs`)
-- broker adapters (`/src/brokers`)
-- backtests (`/src/backtest`)
-- runnable scripts / entrypoints (`/app`)
-- artifacts (`/data`)
+`main` stays minimal and generic. A concrete strategy implementation belongs in a separate
+branch (for this repo: `momentum-example`).
 
-### Quickstart (uv)
+## Quickstart (template branch)
 
 ```bash
-uv sync --group dev --group brokers-ibkr
-
+uv sync --group dev
 uv run pytest
-uv run python app/backtest.py --source csv --csv data/sample_ohlc.csv
-uv run python app/backtest.py --source ibkr --symbol ASML --contract-id 117902840 --exchange NASDAQ
+uv run qsa backtest
+uv run qsa live
 ```
 
-### Backtesting your strategy
+Both commands are scaffolds on `main` by design.
 
-- Put strategy logic in `src/strategies/<your_strategy>.py`.
-- Follow the convention: export `Params` (dataclass) and `decide_target_position(ohlc, position, p)`.
-- Copy `app/backtest.py` to `app/<your_strategy>_backtest.py`.
-- Change the strategy import in that new app script from `strategies.momentum_example` to your strategy module.
+## Project layout
 
-### Layout
+```text
+quant-strategy-app/
+  pyproject.toml
+  README.md
+  .env.example
+  .gitignore
+  configs/
+  docker/
+  docs/
+  src/qsa/
+  tests/
+  playground/
+  data/
+```
 
-- `src/`: library code (flat, multi-package)
-- `app/`: runner scripts (entrypoints)
-- `examples/`: reference scripts (optional / legacy)
-- `docs/`: documentation
-- `docker/`: dev container
-- `data/`: outputs (ignored by git; kept via `.gitkeep`)
+## Design goals
 
-### Docs
+- Keep `main` reusable and dependency-light.
+- Keep strategy logic under `src/qsa/strategies`.
+- Use one CLI (`qsa`) with `backtest` and `live` subcommands.
+- Isolate broker/vendor adapters from strategy logic.
 
-- `docs/getting_started.md`
-- `docs/architecture.md`
-- `docs/ibkr.md`
+## Branch strategy
+
+- `main`: empty template scaffolding.
+- `momentum-example`: fuller runnable momentum implementation built from this template.
 

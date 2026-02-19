@@ -1,25 +1,21 @@
 [project]
-name = "quant-project-template"
+name = "quant-strategy-app"
 version = "0.1.0"
-description = "Add your description here"
+description = "Template for strategy-agnostic quant research, backtesting, and live execution."
 readme = "README.md"
-requires-python = ">=3.14"
-dependencies = [
-  "pandas",
-  "pydantic-settings",
-]
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+qsa = "qsa.cli:main"
 
 [dependency-groups]
 dev = [
+  "mypy",
   "pytest",
   "pytest-cov",
   "ruff",
-  "mypy",
 ]
-viz = ["plotly"]
-brokers-ibkr = ["ibapi"]
-notebooks = ["jupyter", "ipykernel"]
-service = ["fastapi[standard]"]
 
 [build-system]
 requires = ["setuptools>=70", "wheel"]
@@ -30,17 +26,18 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["backtest*", "brokers*", "config*", "data*", "strategies*", "utils*"]
+include = ["qsa*"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py314"
+target-version = "py312"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
 
 [tool.mypy]
-python_version = "3.14"
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false

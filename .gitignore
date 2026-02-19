@@ -1,27 +1,23 @@
-# Python-generated files
 __pycache__/
 *.py[oc]
 build/
 dist/
-wheels/
-*.egg-info
+*.egg-info/
 
-# Virtual environments
-.venv
+.venv/
+.python-version
 
-# Environment / secrets
 .env
 .env.*
 !.env.example
 
-# Data artifacts (keep directory via .gitkeep)
 data/**
-!data/**/.gitkeep
+!data/raw/
+!data/raw/.gitkeep
+!data/processed/
+!data/processed/.gitkeep
 
-# Notebooks
 .ipynb_checkpoints/
-
-# Tooling caches
 .ruff_cache/
 .mypy_cache/
 .pytest_cache/
@@ -29,6 +25,5 @@ coverage.xml
 .coverage
 htmlcov/
 
-# OS/editor
 .DS_Store
 .vscode/

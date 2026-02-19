@@ -1,2 +1,0 @@
-"""Typed configuration and settings."""
-

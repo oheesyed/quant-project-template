@@ -1,0 +1,12 @@
+services:
+  dev:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    working_dir: /workspace
+    volumes:
+      - ..:/workspace:cached
+    environment:
+      - UV_PROJECT_ENVIRONMENT=/workspace/.venv
+    command: bash -lc "uv sync --group dev && bash"
+

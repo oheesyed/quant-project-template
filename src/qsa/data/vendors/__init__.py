@@ -1,0 +1,2 @@
+"""Market data vendor adapters."""
+

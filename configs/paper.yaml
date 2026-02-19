@@ -1,0 +1,12 @@
+app:
+  env: paper
+  log_level: INFO
+
+data:
+  root: ./data
+  cache_dir: ./data/processed/cache
+
+execution:
+  broker: ibkr
+  mode: paper
+

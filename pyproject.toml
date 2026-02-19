@@ -6,6 +6,8 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   "pydantic",
+  "pandas",
+  "pydantic-settings",
   "pyyaml",
 ]
 
@@ -15,9 +17,11 @@ qsa = "qsa.cli:main"
 [dependency-groups]
 dev = [
   "mypy",
+  "pandas-stubs",
   "pytest",
   "pytest-cov",
   "ruff",
+  "types-PyYAML",
 ]
 
 [build-system]

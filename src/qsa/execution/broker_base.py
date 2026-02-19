@@ -10,6 +10,9 @@ class BrokerAdapter(Protocol):
     def disconnect(self) -> None:
         ...
 
-    def place_market_order(self, symbol: str, quantity: float) -> str:
+    def get_position(self, symbol: str) -> float:
+        ...
+
+    def place_market_order(self, symbol: str, quantity: float, price_hint: float | None = None) -> str:
         ...
 

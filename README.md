@@ -1,48 +1,34 @@
-# quant-strategy-app template
+# quant-strategy-app (`momentum-example` branch)
 
-Strategy-agnostic template for building a quant strategy project with one CLI and separate
-backtest/live runners.
+This branch contains a fuller runnable momentum implementation on top of the template
+architecture. The `main` branch remains strategy-agnostic.
 
-`main` stays minimal and generic. A concrete strategy implementation belongs in a separate
-branch (for this repo: `momentum-example`).
-
-## Quickstart (template branch)
+## Quickstart
 
 ```bash
 uv sync --group dev
 uv run pytest
-uv run qsa backtest
-uv run qsa live
+uv run qsa backtest --config configs/dev.yaml
+uv run qsa live --config configs/paper.yaml --dry-run --symbol DEMO
 ```
 
-Both commands are scaffolds on `main` by design.
+## What is implemented here
+
+- Momentum strategy in `src/qsa/strategies/momentum.py`
+- Event-driven style backtest engine in `src/qsa/backtest/engine.py`
+- Backtest metrics in `src/qsa/backtest/metrics.py`
+- Live runner with paper-style IBKR adapter stub in `src/qsa/live/runner.py`
+- Shared risk and sizing logic in `src/qsa/portfolio/`
+- CSV vendor path and sample dataset (`tests/fixtures/sample_ohlc.csv`)
 
 ## Project layout
 
 ```text
 quant-strategy-app/
-  pyproject.toml
-  README.md
-  .env.example
-  .gitignore
   configs/
-  docker/
   docs/
   src/qsa/
   tests/
-  playground/
   data/
 ```
-
-## Design goals
-
-- Keep `main` reusable and dependency-light.
-- Keep strategy logic under `src/qsa/strategies`.
-- Use one CLI (`qsa`) with `backtest` and `live` subcommands.
-- Isolate broker/vendor adapters from strategy logic.
-
-## Branch strategy
-
-- `main`: empty template scaffolding.
-- `momentum-example`: fuller runnable momentum implementation built from this template.
 

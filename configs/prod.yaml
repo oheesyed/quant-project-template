@@ -5,8 +5,20 @@ app:
 data:
   root: ./data
   cache_dir: ./data/processed/prod_cache
+  source: csv
+  csv_path: ./tests/fixtures/sample_ohlc.csv
+
+strategy:
+  name: momentum
+  lookback: 15
+  entry_threshold: 0.05
+  exit_threshold: 0.0
 
 execution:
   broker: ibkr
   mode: live
+
+risk:
+  max_abs_position: 200
+  target_notional: 20000
 

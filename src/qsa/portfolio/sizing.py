@@ -6,3 +6,7 @@ def size_from_notional(price: float, notional: float) -> float:
         return 0.0
     return notional / price
 
+
+def shares_for_unit_signal(price: float, notional: float, signal: float) -> float:
+    return size_from_notional(price=price, notional=notional) * signal
+

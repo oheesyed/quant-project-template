@@ -28,6 +28,7 @@ htmlcov/
 .DS_Store
 .vscode/
 .cursor/
+TODO.md
 .cursors/
 .claude/
 

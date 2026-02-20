@@ -17,7 +17,7 @@ src/qsa/
   cli.py
   config/settings.py
   data/{schemas.py,cache.py,vendors/...}
-  strategies/{base.py,mean_reversion.py}
+  strategies/base.py
   portfolio/{risk.py,sizing.py}
   backtest/{engine.py,costs.py,metrics.py,run.py}
   execution/{broker_base.py,ibkr.py}

@@ -29,3 +29,6 @@ htmlcov/
 .vscode/
 .cursor/
 .cursors/
+.claude/
+
+TODO.md

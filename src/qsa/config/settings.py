@@ -5,7 +5,9 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+
 class Settings(BaseModel):
     """Strict app settings loaded from YAML + env fallback."""
 
@@ -19,11 +21,11 @@ class Settings(BaseModel):
     broker: str
     data_source: str
     csv_path: Path
-    strategy_lookback: int
-    strategy_entry_threshold: float
+    strategy_lookback: int = Field(gt=0)
+    strategy_entry_threshold: float = Field(ge=0.0)
     strategy_exit_threshold: float
-    max_abs_position: float
-    target_notional: float
+    max_abs_position: float = Field(gt=0.0)
+    target_notional: float = Field(gt=0.0)
 
 
 def _read_yaml(config_path: Path) -> dict[str, Any]:

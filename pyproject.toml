@@ -4,7 +4,10 @@ version = "0.1.0"
 description = "Template for strategy-agnostic quant research, backtesting, and live execution."
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+  "pydantic",
+  "pyyaml",
+]
 
 [project.scripts]
 qsa = "qsa.cli:main"

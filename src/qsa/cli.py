@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 
 from qsa.backtest.run import run_backtest
 from qsa.live.runner import run_live
@@ -23,7 +24,9 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = _build_parser().parse_args()
     if args.command == "backtest":
-        print(run_backtest(config_path=args.config))
+        result = run_backtest(config_path=args.config)
+        print(json.dumps(result, indent=2))
         return
-    print(run_live(config_path=args.config, dry_run=args.dry_run))
+    result = run_live(config_path=args.config, dry_run=args.dry_run)
+    print(json.dumps(result, indent=2))
 

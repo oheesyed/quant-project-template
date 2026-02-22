@@ -26,7 +26,9 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = _build_parser().parse_args()
     if args.command == "backtest":
-        print(run_backtest(config_path=args.config, initial_cash=args.initial_cash))
+        result = run_backtest(config_path=args.config, initial_cash=args.initial_cash)
+        print(json.dumps(result, indent=2))
         return
-    print(run_live(config_path=args.config, dry_run=args.dry_run, symbol=args.symbol))
+    result = run_live(config_path=args.config, dry_run=args.dry_run, symbol=args.symbol)
+    print(json.dumps(result, indent=2))
 

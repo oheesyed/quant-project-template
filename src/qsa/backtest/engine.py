@@ -8,7 +8,7 @@ from qsa.backtest.metrics import annualized_sharpe, max_drawdown, total_return
 from qsa.data.schemas import Bar
 from qsa.portfolio.risk import clamp_target_position
 from qsa.portfolio.sizing import shares_for_unit_signal
-from qsa.strategies.momentum import MomentumStrategy
+from qsa.strategies.base import Strategy
 
 
 @dataclass(frozen=True)
@@ -24,7 +24,7 @@ class BacktestSummary:
 def run_engine(
     bars: Sequence[Bar],
     *,
-    strategy: MomentumStrategy,
+    strategy: Strategy,
     initial_cash: float,
     target_notional: float,
     max_abs_position: float,

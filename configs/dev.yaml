@@ -17,6 +17,10 @@ strategy:
 execution:
   broker: ibkr
   mode: paper
+  host: 127.0.0.1
+  port: 7497
+  client_id: 11
+  account: DU1234567
 
 risk:
   max_abs_position: 200

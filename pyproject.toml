@@ -9,6 +9,7 @@ dependencies = [
   "pandas",
   "pydantic-settings",
   "pyyaml",
+  "ib-async>=2.1.0",
 ]
 
 [project.scripts]

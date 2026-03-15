@@ -19,6 +19,10 @@ class Settings(BaseModel):
     data_dir: Path
     cache_dir: Path
     broker: str
+    ib_host: str
+    ib_port: int
+    ib_client_id: int
+    ib_account: str
     data_source: str
     csv_path: Path
     strategy_lookback: int = Field(gt=0)
@@ -53,6 +57,10 @@ def load_settings(config_path: str) -> Settings:
         "data_dir": Path(str(data.get("root", getenv("QSA_DATA_DIR", "./data")))),
         "cache_dir": Path(str(data.get("cache_dir", getenv("QSA_CACHE_DIR", "./data/processed/cache")))),
         "broker": execution.get("broker", getenv("QSA_BROKER", "ibkr")),
+        "ib_host": str(execution.get("host", getenv("QSA_IB_HOST", "127.0.0.1"))),
+        "ib_port": int(execution.get("port", getenv("QSA_IB_PORT", 7497))),
+        "ib_client_id": int(execution.get("client_id", getenv("QSA_IB_CLIENT_ID", 11))),
+        "ib_account": str(execution.get("account", getenv("QSA_IB_ACCOUNT", ""))),
         "data_source": str(data.get("source", "csv")),
         "csv_path": Path(str(data.get("csv_path", "./tests/fixtures/sample_ohlc.csv"))),
         "strategy_lookback": int(strategy.get("lookback", 15)),

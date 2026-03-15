@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 
 from qsa.backtest.run import run_backtest
@@ -29,6 +30,6 @@ def main() -> None:
         result = run_backtest(config_path=args.config, initial_cash=args.initial_cash)
         print(json.dumps(result, indent=2))
         return
-    result = run_live(config_path=args.config, dry_run=args.dry_run, symbol=args.symbol)
+    result = asyncio.run(run_live(config_path=args.config, dry_run=args.dry_run, symbol=args.symbol))
     print(json.dumps(result, indent=2))
 

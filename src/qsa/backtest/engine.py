@@ -50,8 +50,25 @@ def run_engine(
     max_gross_leverage: float = 1.0,
     stop_on_nonpositive_equity: bool = True,
     commission_per_share: float = 0.005,
-    slippage_bps: float = 1.0,
+    slippage_bps: float = 5.0,
 ) -> BacktestSummary:
+    """Run the backtest engine.
+
+    Args:
+        bars: Sequence of Bar objects representing the historical price data.
+        strategy: Strategy instance to use for generating signals.
+        initial_cash: Initial cash balance.
+        target_notional: Target notional value for each trade.
+        max_abs_position: Maximum absolute position size in shares.
+        allow_leverage: Whether to allow leverage in trades.
+        max_gross_leverage: Maximum gross leverage allowed.
+        stop_on_nonpositive_equity: Whether to stop trading when equity becomes non-positive.
+        commission_per_share: Per-share commission fee.
+        slippage_bps: Slippage in basis points (bps).
+
+    Returns:
+        BacktestSummary: Summary of the backtest results.
+    """
     if not bars:
         return BacktestSummary(
             0,
@@ -99,7 +116,7 @@ def run_engine(
                     {
                         "signal_time": signal_bar.time.isoformat(),
                         "trade_time": bar.time.isoformat(),
-                        "reason": "equity_stop_liquidation",
+                        "action": "equity_stop_liquidation",
                         "delta": round(liquidation_delta, 6),
                         "target_position": 0.0,
                         "price": round(bar.close, 6),
@@ -152,7 +169,7 @@ def run_engine(
                 {
                     "signal_time": signal_bar.time.isoformat(),
                     "trade_time": bar.time.isoformat(),
-                    "reason": signal_reason,
+                    "action": signal_reason,
                     "delta": round(delta, 6),
                     "target_position": round(target_position, 6),
                     "price": round(bar.close, 6),

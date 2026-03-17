@@ -52,6 +52,8 @@ def run_backtest(
         allow_leverage=settings.allow_leverage,
         max_gross_leverage=settings.max_gross_leverage,
         stop_on_nonpositive_equity=settings.stop_on_nonpositive_equity,
+        commission_per_share=settings.commission_per_share,
+        slippage_bps=settings.slippage_bps,
     )
     metrics: dict[str, Any] = {
         "status": "ok",

@@ -38,6 +38,8 @@ class Settings(BaseModel):
     allow_leverage: bool
     max_gross_leverage: float = Field(gt=0.0)
     stop_on_nonpositive_equity: bool
+    commission_per_share: float = Field(ge=0.0)
+    slippage_bps: float = Field(ge=0.0)
 
 
 def _read_yaml(config_path: Path) -> dict[str, Any]:
@@ -58,6 +60,7 @@ def load_settings(config_path: str) -> Settings:
     execution = cfg.get("execution", {})
     strategy = cfg.get("strategy", {})
     risk = cfg.get("risk", {})
+    costs = cfg.get("costs", {})
     raw = {
         "app_env": app.get("env", getenv("APP_ENV", "dev")),
         "mode": execution.get("mode", getenv("QSA_MODE", "paper")),
@@ -84,6 +87,8 @@ def load_settings(config_path: str) -> Settings:
         "allow_leverage": risk.get("allow_leverage", False),
         "max_gross_leverage": float(risk.get("max_gross_leverage", 1.0)),
         "stop_on_nonpositive_equity": risk.get("stop_on_nonpositive_equity", True),
+        "commission_per_share": float(costs.get("commission_per_share", 0.005)),
+        "slippage_bps": float(costs.get("slippage_bps", 1.0)),
     }
     return Settings.model_validate(raw)
 

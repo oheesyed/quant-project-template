@@ -46,7 +46,7 @@ quant-strategy-app/
 
 ## Runtime flow
 
-1. CLI loads settings and dispatches to `backtest` or `live`.
+1. CLI loads settings (including strategy/risk/cost assumptions) and dispatches to `backtest` or `live`.
 2. Backtest path builds a run-scoped dataset snapshot from IBKR bars via `data/pipeline.py`.
 3. Strategy produces target intent; sizing/risk clamps final position.
 4. Backtest engine enforces anti-lookahead timing (signals at t-1, fills at t), applies costs/slippage, and computes summary metrics.

@@ -88,7 +88,7 @@ Typical `trades.csv` fields:
 - `signal_time`, `trade_time`
 - `delta`, `target_position`, `price`, `notional`
 - `commission`, `slippage`
-- `reason`
+- `action`
 
 Typical `equity_curve.csv` fields:
 
@@ -100,11 +100,11 @@ Typical `equity_curve.csv` fields:
 
 If you are new, only change these first:
 
-1. `configs/dev.yaml` (lookback, thresholds, risk values, IBKR request fields).
+1. `configs/dev.yaml` (lookback, thresholds, risk values, trading costs, IBKR request fields).
 2. `src/qsa/strategies/momentum_example.py` (signal rules).
 
 When updating YAML, make sure `execution` (including account details), `strategy`,
-and `risk` sections match your own broker setup and trading objectives.
+`risk`, and `costs` sections match your own broker setup and trading objectives.
 
 Leave engine/data/tracking unchanged until you can run:
 
@@ -122,7 +122,7 @@ Edit these to personalize your setup:
 - `src/qsa/strategies/momentum_example.py`
   - Change entry/exit logic, feature math, and signal reasons.
 - `configs/dev.yaml`
-  - Tune strategy/risk values for research runs.
+  - Tune strategy/risk/cost values for research runs.
 - `configs/paper.yaml`
   - Set paper-trading defaults for dry runs.
 - `src/qsa/strategies/`
@@ -154,7 +154,7 @@ order model, changing data source logic, or extending app capabilities.
 3. Personalize your first strategy:
    - edit `src/qsa/strategies/momentum_example.py`, keep changes small
 4. Tune config for that strategy:
-   - update thresholds/risk fields in `configs/dev.yaml`
+   - update thresholds/risk/cost fields in `configs/dev.yaml`
 5. (Optional) Fill out a strategy spec:
    - copy `docs/strategy_spec_template.md` into a strategy-specific doc under `docs/`
 6. Re-run and compare outputs:

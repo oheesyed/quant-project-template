@@ -117,6 +117,6 @@ def test_engine_liquidates_and_stops_after_nonpositive_equity() -> None:
         slippage_bps=0.0,
     )
     assert summary.trades == 2
-    assert summary.trades_log[-1]["reason"] == "equity_stop_liquidation"
+    assert summary.trades_log[-1]["action"] == "equity_stop_liquidation"
     assert summary.trades_log[-1]["target_position"] == 0.0
     assert summary.final_equity == 0.0

@@ -52,9 +52,25 @@ class TWS_Wrapper_Client:
             self.ib.reqAutoOpenOrders(True)
         await self.ib.reqExecutionsAsync()
 
+    def get_managed_accounts(self) -> list[str]:
+        raw_accounts = self.ib.managedAccounts()
+        if raw_accounts is None:
+            return []
+        if isinstance(raw_accounts, str):
+            return [acct.strip() for acct in raw_accounts.split(",") if acct.strip()]
+        return [str(acct).strip() for acct in raw_accounts if str(acct).strip()]
+
     @staticmethod
     def get_contract(symbol: str, contract_id: int, exchange: str) -> Contract:
-        return Contract(localSymbol=symbol, conId=int(contract_id), exchange=exchange)
+        kwargs: dict[str, Any] = {
+            "symbol": str(symbol),
+            "secType": "STK",
+            "exchange": str(exchange),
+            "currency": "USD",
+        }
+        if int(contract_id) > 0:
+            kwargs["conId"] = int(contract_id)
+        return Contract(**kwargs)
 
     async def request_market_data(
         self, contract: Contract, *, delayed: bool = False, req_id: int | None = None
@@ -295,6 +311,8 @@ class TWS_Wrapper_Client:
         price_hint: float | None = None,
     ) -> str:
         del price_hint
+        if abs(float(quantity)) < 1.0:
+            raise ValueError(f"Market order quantity must be at least 1 share. Got {quantity:.4f}.")
         contract = self.get_contract(symbol=symbol, contract_id=0, exchange="SMART")
         action = "BUY" if quantity > 0 else "SELL"
         result = await self.send_market_order(
@@ -304,6 +322,13 @@ class TWS_Wrapper_Client:
             tif="DAY",
         )
         order_id = int(result["order_id"])
+        await asyncio.sleep(0.2)
+        order = self.get_order_by_id(order_id)
+        status = str(order.get("status", "") if order is not None else "")
+        if status in {"ValidationError", "ApiCancelled", "Cancelled", "Inactive"}:
+            raise RuntimeError(
+                f"IBKR rejected market order {order_id} for {symbol}: status={status}."
+            )
         return f"ibkr:{symbol}:{quantity:.4f}:{order_id}"
 
     async def send_limit_order(

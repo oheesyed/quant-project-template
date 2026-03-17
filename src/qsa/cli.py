@@ -20,6 +20,7 @@ def _build_parser() -> argparse.ArgumentParser:
     live = sub.add_parser("live", help="Run live scaffold.")
     live.add_argument("--config", default="configs/paper.yaml")
     live.add_argument("--dry-run", action="store_true")
+    live.add_argument("--symbol")
 
     return parser
 
@@ -34,6 +35,7 @@ def main() -> None:
         )
         print(json.dumps(result, indent=2))
         return
-    result = asyncio.run(run_live(config_path=args.config, dry_run=args.dry_run))
+    result = asyncio.run(
+        run_live(config_path=args.config, dry_run=args.dry_run, symbol=args.symbol)
+    )
     print(json.dumps(result, indent=2))
-

@@ -33,3 +33,7 @@ risk:
   max_gross_leverage: 1.0
   stop_on_nonpositive_equity: true
 
+costs:
+  commission_per_share: 0.005
+  slippage_bps: 1.0
+

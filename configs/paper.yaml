@@ -4,9 +4,14 @@ app:
 
 data:
   root: ./data
-  cache_dir: ./data/processed/paper_cache
-  source: csv
-  csv_path: ./tests/fixtures/sample_ohlc.csv
+  source: ibkr
+  ib_symbol: AAPL
+  ib_contract_id: 265598
+  ib_exchange: SMART
+  ib_duration: 90 D
+  ib_bar_size: 1 day
+  ib_what_to_show: TRADES
+  ib_use_rth: 1
 
 execution:
   broker: ibkr
@@ -15,4 +20,16 @@ execution:
   port: 7497
   client_id: 11
   account: DU1234567
+
+strategy:
+  lookback: 15
+  entry_threshold: 0.05
+  exit_threshold: 0.0
+
+risk:
+  max_abs_position: 200
+  target_notional: 100
+  allow_leverage: false
+  max_gross_leverage: 1.0
+  stop_on_nonpositive_equity: true
 

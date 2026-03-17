@@ -1,2 +1,2 @@
-"""Data models, cache, and vendor adapters."""
+"""Data models, cache, and IBKR pipeline helpers."""
 

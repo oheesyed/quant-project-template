@@ -1,4 +1,6 @@
 """Strategy interfaces and starter implementations."""
 
-__all__: list[str] = []
+from qsa.strategies.momentum_example import MomentumExampleStrategy, MomentumParams
+
+__all__ = ["MomentumParams", "MomentumExampleStrategy"]
 

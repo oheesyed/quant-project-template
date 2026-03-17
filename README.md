@@ -1,31 +1,18 @@
 # quant-strategy-app
 
-Strategy-agnostic template for quant research, backtesting, and live execution.
-
 ## Quickstart
 
 ```bash
 uv sync --group dev
 uv run pytest
 uv run qsa backtest --config configs/dev.yaml
-uv run qsa live --config configs/paper.yaml --dry-run
+uv run qsa backtest --config configs/dev.yaml --plot
+uv run qsa live --config configs/paper.yaml --dry-run --symbol AAPL
 ```
 
-## Template scope
-
-- Config parsing and strict settings model
-- Backtest and live scaffolds in `src/qsa/backtest/run.py` and `src/qsa/live/runner.py`
-- Execution client and IBKR integration points in `src/qsa/execution/`
-- Strategy interfaces in `src/qsa/strategies/base.py`
-
-## Project layout
-
-```text
-quant-strategy-app/
-  configs/
-  docs/
-  src/qsa/
-  tests/
-  data/
-```
+Backtest artifacts are written to `data/artifacts/runs/<run_id>/`, including
+`bars.csv`, `dataset_manifest.json`, `metrics.json`, `trades.csv`, and
+`equity_curve.csv`.
+When `--plot` is enabled, the run directory also includes `equity_curve.png`,
+`drawdown.png`, and `equity_with_trades.png`.
 

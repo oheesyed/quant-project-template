@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+from dataclasses import asdict
 
 from qsa.backtest.run import run_backtest
 from qsa.live.runner import run_live
@@ -38,4 +39,4 @@ def main() -> None:
     result = asyncio.run(
         run_live(config_path=args.config, dry_run=args.dry_run, symbol=args.symbol)
     )
-    print(json.dumps(result, indent=2))
+    print(json.dumps(asdict(result), indent=2))

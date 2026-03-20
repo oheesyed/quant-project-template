@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import asdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -136,8 +137,11 @@ def test_live_dry_run_returns_mode(tmp_path: Path) -> None:
     result = asyncio.run(
         runner.run_live(config_path=config_path, dry_run=True, symbol="TEST")
     )
-    assert result["run_type"] == "live"
-    assert result["order_id"] == "dry-run"
+    assert result.run_type == "live"
+    assert result.order_id == "dry-run"
+    serialized = asdict(result)
+    assert serialized["signal_action"] == result.signal_action
+    assert serialized["run_type"] == "live"
 
 
 def test_cli_live_accepts_symbol_argument() -> None:

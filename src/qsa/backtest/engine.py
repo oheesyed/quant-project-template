@@ -5,9 +5,9 @@ from typing import Sequence
 
 from qsa.backtest.costs import estimate_commission, estimate_slippage
 from qsa.backtest.metrics import annualized_sharpe, max_drawdown, total_return
-from qsa.data.schemas import Bar
 from qsa.portfolio.risk import clamp_target_position
 from qsa.portfolio.sizing import shares_for_unit_signal
+from qsa.schemas.data import Bar
 from qsa.strategies.base import Strategy
 
 
@@ -134,10 +134,10 @@ def run_engine(
         current_unit = _position_unit(position)
         if trading_stopped:
             target_position = position
-            signal_reason = "equity_stop_blocked"
+            signal_action = "equity_stop_blocked"
         else:
             signal = strategy.generate_signal(bars[:idx], current_position=current_unit)
-            signal_reason = signal.reason
+            signal_action = signal.action
             if signal.target_position == current_unit:
                 # Keep share count unchanged while holding direction.
                 target_position = position
@@ -149,7 +149,7 @@ def run_engine(
                     candidate_leverage = _gross_leverage(candidate_target, bar.close, equity_before)
                     if candidate_leverage > max_gross_leverage:
                         target_position = position
-                        signal_reason = "leverage_cap_blocked"
+                        signal_action = "leverage_cap_blocked"
                     else:
                         target_position = candidate_target
                 else:
@@ -169,7 +169,7 @@ def run_engine(
                 {
                     "signal_time": signal_bar.time.isoformat(),
                     "trade_time": bar.time.isoformat(),
-                    "action": signal_reason,
+                    "action": signal_action,
                     "delta": round(delta, 6),
                     "target_position": round(target_position, 6),
                     "price": round(bar.close, 6),

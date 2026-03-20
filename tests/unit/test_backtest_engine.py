@@ -4,22 +4,22 @@ from datetime import datetime, timedelta
 from typing import Sequence
 
 from qsa.backtest.engine import run_engine
-from qsa.data.schemas import Bar
+from qsa.schemas.data import Bar
 from qsa.strategies.base import StrategySignal
 
 
 class _AlwaysLongStrategy:
     def generate_signal(self, bars: Sequence[Bar], current_position: float) -> StrategySignal:
         del bars, current_position
-        return StrategySignal(target_position=1.0, reason="always_long")
+        return StrategySignal(target_position=1.0, action="always_long")
 
 
 class _EchoUnitStrategy:
     def generate_signal(self, bars: Sequence[Bar], current_position: float) -> StrategySignal:
         del bars
         if current_position == 0.0:
-            return StrategySignal(target_position=1.0, reason="enter")
-        return StrategySignal(target_position=current_position, reason="hold")
+            return StrategySignal(target_position=1.0, action="enter")
+        return StrategySignal(target_position=current_position, action="hold")
 
 
 def _bars() -> list[Bar]:

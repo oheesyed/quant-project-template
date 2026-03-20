@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from dataclasses import dataclass
 
 from qsa.config.settings import load_settings
 from qsa.data.pipeline import fetch_ibkr_bars_async
@@ -9,6 +9,27 @@ from qsa.execution.tws_client import TWS_Wrapper_Client
 from qsa.portfolio.risk import clamp_target_position
 from qsa.portfolio.sizing import shares_for_unit_signal
 from qsa.strategies.momentum_example import MomentumExampleStrategy, MomentumParams
+
+
+@dataclass(frozen=True)
+class LiveRunResult:
+    status: str
+    env: str
+    run_type: str
+    execution_mode: str
+    config: str
+    broker: str
+    data_dir: str
+    dry_run: bool
+    symbol: str
+    signal_action: str
+    target_position: float
+    delta: float
+    gross_leverage_estimate: float
+    account_equity: float | None
+    leverage_blocked: bool
+    equity_stop_blocked: bool
+    order_id: str
 
 
 def _position_unit(position_shares: float) -> float:
@@ -40,7 +61,7 @@ async def _resolve_account_equity(
 
 async def run_live(
     config_path: str, dry_run: bool, symbol: str = "AAPL"
-) -> dict[str, Any]:
+) -> LiveRunResult:
     settings = load_settings(config_path)
     bars = await fetch_ibkr_bars_async(settings)
     if not bars:
@@ -131,26 +152,26 @@ async def run_live(
                 symbol=symbol, quantity=delta, price_hint=last_price
             )
 
-        return {
-            "status": "ok",
-            "env": settings.app_env,
-            "run_type": "live",
-            "execution_mode": settings.mode,
-            "config": config_path,
-            "broker": settings.broker,
-            "data_dir": str(settings.data_dir),
-            "dry_run": dry_run,
-            "symbol": symbol,
-            "signal_reason": signal.reason,
-            "target_position": round(target_position, 4),
-            "delta": round(delta, 4),
-            "gross_leverage_estimate": round(
+        return LiveRunResult(
+            status="ok",
+            env=settings.app_env,
+            run_type="live",
+            execution_mode=settings.mode,
+            config=config_path,
+            broker=settings.broker,
+            data_dir=str(settings.data_dir),
+            dry_run=dry_run,
+            symbol=symbol,
+            signal_action=signal.action,
+            target_position=round(target_position, 4),
+            delta=round(delta, 4),
+            gross_leverage_estimate=round(
                 _gross_leverage(target_position, last_price, equity_proxy), 6
             ),
-            "account_equity": account_equity,
-            "leverage_blocked": leverage_blocked,
-            "equity_stop_blocked": equity_stop_blocked,
-            "order_id": order_id,
-        }
+            account_equity=account_equity,
+            leverage_blocked=leverage_blocked,
+            equity_stop_blocked=equity_stop_blocked,
+            order_id=order_id,
+        )
     finally:
         await broker.disconnect()

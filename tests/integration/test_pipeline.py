@@ -59,6 +59,9 @@ class _FakeBroker:
         del symbol
         return 0.0
 
+    def get_managed_accounts(self) -> list[str]:
+        return [self.account]
+
     def get_account_data(self) -> dict[str, float | None]:
         return {
             "account_balance": 100_000.0,
@@ -95,4 +98,4 @@ def test_backtest_then_live_dry_run_pipeline(tmp_path: Path) -> None:
     runner.TWS_Wrapper_Client = _FakeBroker
     live = asyncio.run(runner.run_live(paper_config, dry_run=True, symbol="TEST"))
     assert backtest["status"] == "ok"
-    assert live["status"] == "ok"
+    assert live.status == "ok"

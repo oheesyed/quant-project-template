@@ -2,26 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
 import pandas as pd
 
 from qsa.config.settings import Settings
-from qsa.data.schemas import Bar
 from qsa.execution.tws_client import TWS_Wrapper_Client
+from qsa.schemas.artifacts import DatasetSnapshot
+from qsa.schemas.data import Bar
 
 
 REQUIRED_COLUMNS = ("time", "open", "high", "low", "close", "volume")
-
-
-@dataclass(frozen=True)
-class DatasetSnapshot:
-    dataset_id: str
-    bars_frame: pd.DataFrame
-    bars: list[Bar]
-    manifest: dict[str, Any]
 
 
 def _clean_ohlcv(df: pd.DataFrame) -> pd.DataFrame:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import uuid
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -10,12 +9,7 @@ from typing import Any
 import pandas as pd
 
 from qsa.config.settings import Settings
-
-
-@dataclass(frozen=True)
-class RunContext:
-    run_id: str
-    run_dir: Path
+from qsa.schemas.artifacts import RunContext
 
 
 def _utc_stamp() -> str:

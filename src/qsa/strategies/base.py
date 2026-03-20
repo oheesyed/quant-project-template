@@ -3,13 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, Sequence
 
-from qsa.data.schemas import Bar
+from qsa.schemas.data import Bar
 
 
 @dataclass(frozen=True)
 class StrategySignal:
     target_position: float
-    reason: str = ""
+    action: str = ""
 
 
 class Strategy(Protocol):

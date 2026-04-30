@@ -80,8 +80,10 @@ class _FakeBroker:
         symbol: str,
         quantity: float,
         price_hint: float | None = None,
+        contract_id: int = 0,
+        exchange: str = "SMART",
     ) -> str:
-        del symbol, quantity, price_hint
+        del symbol, quantity, price_hint, contract_id, exchange
         return "fake-order-id"
 
 
@@ -101,14 +103,44 @@ class _RejectingBroker(_FakeBroker):
         symbol: str,
         quantity: float,
         price_hint: float | None = None,
+        contract_id: int = 0,
+        exchange: str = "SMART",
     ) -> str:
-        del symbol, quantity, price_hint
+        del symbol, quantity, price_hint, contract_id, exchange
         raise RuntimeError("IBKR rejected market order 4 for TEST: status=ValidationError.")
 
 
 class _UnknownAccountBroker(_FakeBroker):
     def get_managed_accounts(self) -> list[str]:
         return ["DU9999999"]
+
+
+class _RecordingBroker(_FakeBroker):
+    position_symbols: list[str] = []
+    orders: list[dict[str, object]] = []
+
+    def get_position(self, symbol: str) -> float:
+        self.position_symbols.append(symbol)
+        return 0.0
+
+    async def place_market_order(
+        self,
+        symbol: str,
+        quantity: float,
+        price_hint: float | None = None,
+        contract_id: int = 0,
+        exchange: str = "SMART",
+    ) -> str:
+        self.orders.append(
+            {
+                "symbol": symbol,
+                "quantity": quantity,
+                "price_hint": price_hint,
+                "contract_id": contract_id,
+                "exchange": exchange,
+            }
+        )
+        return "recorded-order-id"
 
 
 def _write_isolated_config(tmp_path: Path, template_path: str) -> str:
@@ -151,6 +183,35 @@ def test_cli_live_accepts_symbol_argument() -> None:
     )
     assert args.command == "live"
     assert args.symbol == "AAPL"
+
+
+def test_live_defaults_to_configured_ib_symbol(tmp_path: Path) -> None:
+    _RecordingBroker.position_symbols = []
+    _RecordingBroker.orders = []
+    runner.TWS_Wrapper_Client = _RecordingBroker
+    data_pipeline.TWS_Wrapper_Client = _RecordingBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+
+    result = asyncio.run(runner.run_live(config_path=config_path, dry_run=True))
+
+    assert result.symbol == "AAPL"
+    assert _RecordingBroker.position_symbols == ["AAPL"]
+
+
+def test_live_orders_use_configured_contract_details(tmp_path: Path) -> None:
+    _RecordingBroker.position_symbols = []
+    _RecordingBroker.orders = []
+    runner.TWS_Wrapper_Client = _RecordingBroker
+    data_pipeline.TWS_Wrapper_Client = _RecordingBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+
+    result = asyncio.run(runner.run_live(config_path=config_path, dry_run=False))
+
+    assert result.order_id == "recorded-order-id"
+    assert _RecordingBroker.orders
+    assert _RecordingBroker.orders[0]["symbol"] == "AAPL"
+    assert _RecordingBroker.orders[0]["contract_id"] == 265598
+    assert _RecordingBroker.orders[0]["exchange"] == "SMART"
 
 
 def test_live_non_dry_run_requires_account_equity(tmp_path: Path) -> None:

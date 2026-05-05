@@ -80,8 +80,10 @@ class _FakeBroker:
         symbol: str,
         quantity: float,
         price_hint: float | None = None,
+        contract_id: int = 0,
+        exchange: str = "SMART",
     ) -> str:
-        del symbol, quantity, price_hint
+        del symbol, quantity, price_hint, contract_id, exchange
         return "fake-order-id"
 
 
@@ -101,14 +103,70 @@ class _RejectingBroker(_FakeBroker):
         symbol: str,
         quantity: float,
         price_hint: float | None = None,
+        contract_id: int = 0,
+        exchange: str = "SMART",
     ) -> str:
-        del symbol, quantity, price_hint
+        del symbol, quantity, price_hint, contract_id, exchange
         raise RuntimeError("IBKR rejected market order 4 for TEST: status=ValidationError.")
+
+
+class _SymbolTrackingBroker(_FakeBroker):
+    historical_symbols: list[str] = []
+    wait_symbols: list[str] = []
+    frame_symbols: list[str] = []
+    position_symbols: list[str] = []
+    last_order: dict[str, object] | None = None
+
+    async def request_historical_data(self, *args: object, **kwargs: object) -> None:
+        contract = kwargs.get("contract", args[0] if args else None)
+        if isinstance(contract, dict):
+            self.historical_symbols.append(str(contract["symbol"]))
+        return None
+
+    async def wait_for_historical_data(
+        self, symbol: str, timeframe: str, timeout_s: float = 30.0
+    ) -> bool:
+        del timeframe, timeout_s
+        self.wait_symbols.append(symbol)
+        return True
+
+    def get_ohlc_data(self, symbol: str, timeframe: str) -> pd.DataFrame:
+        self.frame_symbols.append(symbol)
+        return super().get_ohlc_data(symbol, timeframe)
+
+    def get_position(self, symbol: str) -> float:
+        self.position_symbols.append(symbol)
+        return 0.0
+
+    async def place_market_order(
+        self,
+        symbol: str,
+        quantity: float,
+        price_hint: float | None = None,
+        contract_id: int = 0,
+        exchange: str = "SMART",
+    ) -> str:
+        self.__class__.last_order = {
+            "symbol": symbol,
+            "quantity": quantity,
+            "price_hint": price_hint,
+            "contract_id": contract_id,
+            "exchange": exchange,
+        }
+        return "recorded-order-id"
 
 
 class _UnknownAccountBroker(_FakeBroker):
     def get_managed_accounts(self) -> list[str]:
         return ["DU9999999"]
+
+
+def _reset_symbol_tracking_broker() -> None:
+    _SymbolTrackingBroker.historical_symbols = []
+    _SymbolTrackingBroker.wait_symbols = []
+    _SymbolTrackingBroker.frame_symbols = []
+    _SymbolTrackingBroker.position_symbols = []
+    _SymbolTrackingBroker.last_order = None
 
 
 def _write_isolated_config(tmp_path: Path, template_path: str) -> str:
@@ -142,6 +200,54 @@ def test_live_dry_run_returns_mode(tmp_path: Path) -> None:
     serialized = asdict(result)
     assert serialized["signal_action"] == result.signal_action
     assert serialized["run_type"] == "live"
+
+
+def test_live_uses_config_symbol_when_cli_symbol_omitted(tmp_path: Path) -> None:
+    runner.TWS_Wrapper_Client = _SymbolTrackingBroker
+    data_pipeline.TWS_Wrapper_Client = _SymbolTrackingBroker  # type: ignore[assignment]
+    _reset_symbol_tracking_broker()
+
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+    result = asyncio.run(runner.run_live(config_path=config_path, dry_run=True))
+
+    assert result.symbol == "AAPL"
+    assert _SymbolTrackingBroker.historical_symbols == ["AAPL"]
+    assert _SymbolTrackingBroker.wait_symbols == ["AAPL"]
+    assert _SymbolTrackingBroker.frame_symbols == ["AAPL"]
+    assert _SymbolTrackingBroker.position_symbols == ["AAPL"]
+
+
+def test_live_fetches_history_for_explicit_trading_symbol(tmp_path: Path) -> None:
+    runner.TWS_Wrapper_Client = _SymbolTrackingBroker
+    data_pipeline.TWS_Wrapper_Client = _SymbolTrackingBroker  # type: ignore[assignment]
+    _reset_symbol_tracking_broker()
+
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+    result = asyncio.run(
+        runner.run_live(config_path=config_path, dry_run=True, symbol="MSFT")
+    )
+
+    assert result.symbol == "MSFT"
+    assert _SymbolTrackingBroker.historical_symbols == ["MSFT"]
+    assert _SymbolTrackingBroker.wait_symbols == ["MSFT"]
+    assert _SymbolTrackingBroker.frame_symbols == ["MSFT"]
+    assert _SymbolTrackingBroker.position_symbols == ["MSFT"]
+
+
+def test_live_orders_use_resolved_instrument_contract(tmp_path: Path) -> None:
+    runner.TWS_Wrapper_Client = _SymbolTrackingBroker
+    data_pipeline.TWS_Wrapper_Client = _SymbolTrackingBroker  # type: ignore[assignment]
+    _reset_symbol_tracking_broker()
+
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+    result = asyncio.run(runner.run_live(config_path=config_path, dry_run=False))
+
+    assert result.order_id == "recorded-order-id"
+    assert result.symbol == "AAPL"
+    assert _SymbolTrackingBroker.last_order is not None
+    assert _SymbolTrackingBroker.last_order["symbol"] == "AAPL"
+    assert _SymbolTrackingBroker.last_order["contract_id"] == 265598
+    assert _SymbolTrackingBroker.last_order["exchange"] == "SMART"
 
 
 def test_cli_live_accepts_symbol_argument() -> None:

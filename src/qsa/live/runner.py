@@ -60,10 +60,18 @@ async def _resolve_account_equity(
 
 
 async def run_live(
-    config_path: str, dry_run: bool, symbol: str = "AAPL"
+    config_path: str, dry_run: bool, symbol: str | None = None
 ) -> LiveRunResult:
     settings = load_settings(config_path)
-    bars = await fetch_ibkr_bars_async(settings)
+    resolved_symbol = (symbol or settings.ib_symbol).strip()
+    if not resolved_symbol:
+        raise ValueError("A live trading symbol is required.")
+    data_settings = settings
+    if resolved_symbol != settings.ib_symbol:
+        data_settings = settings.model_copy(
+            update={"ib_symbol": resolved_symbol, "ib_contract_id": 0}
+        )
+    bars = await fetch_ibkr_bars_async(data_settings)
     if not bars:
         raise ValueError("No bars loaded for live runner.")
 
@@ -95,7 +103,7 @@ async def run_live(
                     f"accounts: {managed_accounts}."
                 )
 
-        current_position = broker.get_position(symbol)
+        current_position = broker.get_position(resolved_symbol)
         current_unit = _position_unit(current_position)
         signal = strategy.generate_signal(bars, current_position=current_unit)
         last_price = bars[-1].close
@@ -149,7 +157,11 @@ async def run_live(
         order_id = "dry-run"
         if not dry_run and delta != 0:
             order_id = await broker.place_market_order(
-                symbol=symbol, quantity=delta, price_hint=last_price
+                symbol=resolved_symbol,
+                quantity=delta,
+                price_hint=last_price,
+                contract_id=data_settings.ib_contract_id,
+                exchange=data_settings.ib_exchange,
             )
 
         return LiveRunResult(
@@ -161,7 +173,7 @@ async def run_live(
             broker=settings.broker,
             data_dir=str(settings.data_dir),
             dry_run=dry_run,
-            symbol=symbol,
+            symbol=resolved_symbol,
             signal_action=signal.action,
             target_position=round(target_position, 4),
             delta=round(delta, 4),

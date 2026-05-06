@@ -106,6 +106,14 @@ class _RejectingBroker(_FakeBroker):
         raise RuntimeError("IBKR rejected market order 4 for TEST: status=ValidationError.")
 
 
+class _RecordingBroker(_FakeBroker):
+    position_symbols: list[str] = []
+
+    def get_position(self, symbol: str) -> float:
+        self.position_symbols.append(symbol)
+        return super().get_position(symbol)
+
+
 class _UnknownAccountBroker(_FakeBroker):
     def get_managed_accounts(self) -> list[str]:
         return ["DU9999999"]
@@ -142,6 +150,22 @@ def test_live_dry_run_returns_mode(tmp_path: Path) -> None:
     serialized = asdict(result)
     assert serialized["signal_action"] == result.signal_action
     assert serialized["run_type"] == "live"
+
+
+def test_live_defaults_to_configured_symbol_when_omitted(tmp_path: Path) -> None:
+    _RecordingBroker.position_symbols = []
+    runner.TWS_Wrapper_Client = _RecordingBroker
+    data_pipeline.TWS_Wrapper_Client = _RecordingBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+    cfg_path = Path(config_path)
+    cfg = yaml.safe_load(cfg_path.read_text())
+    cfg["data"]["ib_symbol"] = "MSFT"
+    cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False))
+
+    result = asyncio.run(runner.run_live(config_path=config_path, dry_run=True))
+
+    assert result.symbol == "MSFT"
+    assert _RecordingBroker.position_symbols == ["MSFT"]
 
 
 def test_cli_live_accepts_symbol_argument() -> None:

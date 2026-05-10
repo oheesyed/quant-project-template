@@ -16,15 +16,21 @@ from qsa.live import runner
 
 
 class _FakeBroker:
+    contracts: list[dict[str, object]] = []
+    position_symbols: list[str] = []
+    order_requests: list[dict[str, object]] = []
+
     def __init__(self, host: str, port: int, client_id: int, account: str) -> None:
         self.host = host
         self.port = port
         self.client_id = client_id
         self.account = account
 
-    @staticmethod
-    def get_contract(symbol: str, contract_id: int, exchange: str) -> dict[str, object]:
-        return {"symbol": symbol, "contract_id": contract_id, "exchange": exchange}
+    @classmethod
+    def get_contract(cls, symbol: str, contract_id: int, exchange: str) -> dict[str, object]:
+        contract = {"symbol": symbol, "contract_id": contract_id, "exchange": exchange}
+        cls.contracts.append(contract)
+        return contract
 
     async def connect(self) -> None:
         return None
@@ -61,7 +67,7 @@ class _FakeBroker:
         return pd.DataFrame(rows)
 
     def get_position(self, symbol: str) -> float:
-        del symbol
+        type(self).position_symbols.append(symbol)
         return 0.0
 
     def get_managed_accounts(self) -> list[str]:
@@ -80,8 +86,19 @@ class _FakeBroker:
         symbol: str,
         quantity: float,
         price_hint: float | None = None,
+        *,
+        contract_id: int = 0,
+        exchange: str = "SMART",
     ) -> str:
-        del symbol, quantity, price_hint
+        type(self).order_requests.append(
+            {
+                "symbol": symbol,
+                "quantity": quantity,
+                "price_hint": price_hint,
+                "contract_id": contract_id,
+                "exchange": exchange,
+            }
+        )
         return "fake-order-id"
 
 
@@ -101,8 +118,11 @@ class _RejectingBroker(_FakeBroker):
         symbol: str,
         quantity: float,
         price_hint: float | None = None,
+        *,
+        contract_id: int = 0,
+        exchange: str = "SMART",
     ) -> str:
-        del symbol, quantity, price_hint
+        del symbol, quantity, price_hint, contract_id, exchange
         raise RuntimeError("IBKR rejected market order 4 for TEST: status=ValidationError.")
 
 
@@ -121,7 +141,14 @@ def _write_isolated_config(tmp_path: Path, template_path: str) -> str:
     return str(out_path)
 
 
+def _reset_fake_broker() -> None:
+    _FakeBroker.contracts = []
+    _FakeBroker.position_symbols = []
+    _FakeBroker.order_requests = []
+
+
 def test_backtest_returns_mode_and_metrics(tmp_path: Path) -> None:
+    _reset_fake_broker()
     data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment]
     config_path = _write_isolated_config(tmp_path, "configs/dev.yaml")
     result = run_backtest(config_path=config_path)
@@ -131,6 +158,7 @@ def test_backtest_returns_mode_and_metrics(tmp_path: Path) -> None:
 
 
 def test_live_dry_run_returns_mode(tmp_path: Path) -> None:
+    _reset_fake_broker()
     runner.TWS_Wrapper_Client = _FakeBroker
     data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment]
     config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
@@ -142,6 +170,47 @@ def test_live_dry_run_returns_mode(tmp_path: Path) -> None:
     serialized = asdict(result)
     assert serialized["signal_action"] == result.signal_action
     assert serialized["run_type"] == "live"
+
+
+def test_live_defaults_to_configured_symbol_and_contract(tmp_path: Path) -> None:
+    _reset_fake_broker()
+    runner.TWS_Wrapper_Client = _FakeBroker
+    data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+
+    result = asyncio.run(runner.run_live(config_path=config_path, dry_run=False))
+
+    assert result.symbol == "AAPL"
+    assert _FakeBroker.contracts[0] == {
+        "symbol": "AAPL",
+        "contract_id": 265598,
+        "exchange": "SMART",
+    }
+    assert _FakeBroker.position_symbols == ["AAPL"]
+    assert _FakeBroker.order_requests[0]["symbol"] == "AAPL"
+    assert _FakeBroker.order_requests[0]["contract_id"] == 265598
+    assert _FakeBroker.order_requests[0]["exchange"] == "SMART"
+
+
+def test_live_symbol_override_keeps_data_and_orders_aligned(tmp_path: Path) -> None:
+    _reset_fake_broker()
+    runner.TWS_Wrapper_Client = _FakeBroker
+    data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+
+    result = asyncio.run(
+        runner.run_live(config_path=config_path, dry_run=False, symbol="MSFT")
+    )
+
+    assert result.symbol == "MSFT"
+    assert _FakeBroker.contracts[0] == {
+        "symbol": "MSFT",
+        "contract_id": 0,
+        "exchange": "SMART",
+    }
+    assert _FakeBroker.position_symbols == ["MSFT"]
+    assert _FakeBroker.order_requests[0]["symbol"] == "MSFT"
+    assert _FakeBroker.order_requests[0]["contract_id"] == 0
 
 
 def test_cli_live_accepts_symbol_argument() -> None:

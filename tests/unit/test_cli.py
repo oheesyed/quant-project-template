@@ -111,6 +111,43 @@ class _UnknownAccountBroker(_FakeBroker):
         return ["DU9999999"]
 
 
+class _SymbolRecordingBroker(_FakeBroker):
+    historical_symbols: list[str] = []
+    historical_contract_ids: list[int] = []
+    wait_symbols: list[str] = []
+    ohlc_symbols: list[str] = []
+    position_symbols: list[str] = []
+
+    @classmethod
+    def reset(cls) -> None:
+        cls.historical_symbols = []
+        cls.historical_contract_ids = []
+        cls.wait_symbols = []
+        cls.ohlc_symbols = []
+        cls.position_symbols = []
+
+    async def request_historical_data(self, *args: object, **kwargs: object) -> None:
+        contract = kwargs.get("contract") if "contract" in kwargs else args[0]
+        assert isinstance(contract, dict)
+        self.historical_symbols.append(str(contract["symbol"]))
+        self.historical_contract_ids.append(int(contract["contract_id"]))
+
+    async def wait_for_historical_data(
+        self, symbol: str, timeframe: str, timeout_s: float = 30.0
+    ) -> bool:
+        del timeframe, timeout_s
+        self.wait_symbols.append(symbol)
+        return True
+
+    def get_ohlc_data(self, symbol: str, timeframe: str) -> pd.DataFrame:
+        self.ohlc_symbols.append(symbol)
+        return super().get_ohlc_data(symbol, timeframe)
+
+    def get_position(self, symbol: str) -> float:
+        self.position_symbols.append(symbol)
+        return 0.0
+
+
 def _write_isolated_config(tmp_path: Path, template_path: str) -> str:
     template = Path(template_path)
     cfg = yaml.safe_load(template.read_text())
@@ -142,6 +179,37 @@ def test_live_dry_run_returns_mode(tmp_path: Path) -> None:
     serialized = asdict(result)
     assert serialized["signal_action"] == result.signal_action
     assert serialized["run_type"] == "live"
+
+
+def test_live_omitted_symbol_uses_config_symbol(tmp_path: Path) -> None:
+    _SymbolRecordingBroker.reset()
+    runner.TWS_Wrapper_Client = _SymbolRecordingBroker
+    data_pipeline.TWS_Wrapper_Client = _SymbolRecordingBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+    result = asyncio.run(
+        runner.run_live(config_path=config_path, dry_run=True, symbol=None)
+    )
+    assert result.symbol == "AAPL"
+    assert _SymbolRecordingBroker.historical_symbols == ["AAPL"]
+    assert _SymbolRecordingBroker.wait_symbols == ["AAPL"]
+    assert _SymbolRecordingBroker.ohlc_symbols == ["AAPL"]
+    assert _SymbolRecordingBroker.position_symbols == ["AAPL"]
+
+
+def test_live_symbol_override_drives_data_and_execution(tmp_path: Path) -> None:
+    _SymbolRecordingBroker.reset()
+    runner.TWS_Wrapper_Client = _SymbolRecordingBroker
+    data_pipeline.TWS_Wrapper_Client = _SymbolRecordingBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+    result = asyncio.run(
+        runner.run_live(config_path=config_path, dry_run=True, symbol="MSFT")
+    )
+    assert result.symbol == "MSFT"
+    assert _SymbolRecordingBroker.historical_symbols == ["MSFT"]
+    assert _SymbolRecordingBroker.historical_contract_ids == [0]
+    assert _SymbolRecordingBroker.wait_symbols == ["MSFT"]
+    assert _SymbolRecordingBroker.ohlc_symbols == ["MSFT"]
+    assert _SymbolRecordingBroker.position_symbols == ["MSFT"]
 
 
 def test_cli_live_accepts_symbol_argument() -> None:

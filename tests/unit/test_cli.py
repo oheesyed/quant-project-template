@@ -111,6 +111,26 @@ class _UnknownAccountBroker(_FakeBroker):
         return ["DU9999999"]
 
 
+class _SymbolRecordingBroker(_FakeBroker):
+    historical_contracts: list[dict[str, object]] = []
+    position_symbols: list[str | None] = []
+
+    @classmethod
+    def reset(cls) -> None:
+        cls.historical_contracts = []
+        cls.position_symbols = []
+
+    @staticmethod
+    def get_contract(symbol: str, contract_id: int, exchange: str) -> dict[str, object]:
+        contract = {"symbol": symbol, "contract_id": contract_id, "exchange": exchange}
+        _SymbolRecordingBroker.historical_contracts.append(contract)
+        return contract
+
+    def get_position(self, symbol: str) -> float:
+        _SymbolRecordingBroker.position_symbols.append(symbol)
+        return 0.0
+
+
 def _write_isolated_config(tmp_path: Path, template_path: str) -> str:
     template = Path(template_path)
     cfg = yaml.safe_load(template.read_text())
@@ -142,6 +162,36 @@ def test_live_dry_run_returns_mode(tmp_path: Path) -> None:
     serialized = asdict(result)
     assert serialized["signal_action"] == result.signal_action
     assert serialized["run_type"] == "live"
+
+
+def test_live_uses_config_symbol_when_symbol_omitted(tmp_path: Path) -> None:
+    _SymbolRecordingBroker.reset()
+    runner.TWS_Wrapper_Client = _SymbolRecordingBroker
+    data_pipeline.TWS_Wrapper_Client = _SymbolRecordingBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+    result = asyncio.run(runner.run_live(config_path=config_path, dry_run=True))
+
+    assert result.symbol == "AAPL"
+    assert _SymbolRecordingBroker.position_symbols == ["AAPL"]
+    assert _SymbolRecordingBroker.historical_contracts == [
+        {"symbol": "AAPL", "contract_id": 265598, "exchange": "SMART"}
+    ]
+
+
+def test_live_symbol_override_drives_data_and_position_symbol(tmp_path: Path) -> None:
+    _SymbolRecordingBroker.reset()
+    runner.TWS_Wrapper_Client = _SymbolRecordingBroker
+    data_pipeline.TWS_Wrapper_Client = _SymbolRecordingBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+    result = asyncio.run(
+        runner.run_live(config_path=config_path, dry_run=True, symbol="TEST")
+    )
+
+    assert result.symbol == "TEST"
+    assert _SymbolRecordingBroker.position_symbols == ["TEST"]
+    assert _SymbolRecordingBroker.historical_contracts == [
+        {"symbol": "TEST", "contract_id": 0, "exchange": "SMART"}
+    ]
 
 
 def test_cli_live_accepts_symbol_argument() -> None:

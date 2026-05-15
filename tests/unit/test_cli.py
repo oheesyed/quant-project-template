@@ -144,6 +144,16 @@ def test_live_dry_run_returns_mode(tmp_path: Path) -> None:
     assert serialized["run_type"] == "live"
 
 
+def test_live_uses_configured_symbol_when_omitted(tmp_path: Path) -> None:
+    runner.TWS_Wrapper_Client = _FakeBroker
+    data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+    result = asyncio.run(
+        runner.run_live(config_path=config_path, dry_run=True, symbol=None)
+    )
+    assert result.symbol == "AAPL"
+
+
 def test_cli_live_accepts_symbol_argument() -> None:
     parser = _build_parser()
     args = parser.parse_args(

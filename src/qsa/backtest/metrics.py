@@ -17,6 +17,8 @@ def max_drawdown(equity_curve: list[float]) -> float:
     for value in equity_curve:
         if value > peak:
             peak = value
+        if peak <= 0:
+            continue
         drawdown = value / peak - 1.0
         if drawdown < worst:
             worst = drawdown

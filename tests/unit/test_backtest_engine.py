@@ -97,6 +97,24 @@ def test_engine_blocks_entry_when_leverage_cap_exceeded() -> None:
     assert summary.final_equity == 1_000.0
 
 
+def test_engine_handles_zero_initial_cash_drawdown() -> None:
+    summary = run_engine(
+        _bars(),
+        strategy=_AlwaysLongStrategy(),
+        initial_cash=0.0,
+        target_notional=1_000.0,
+        max_abs_position=1_000.0,
+        allow_leverage=False,
+        max_gross_leverage=1.0,
+        commission_per_share=0.0,
+        slippage_bps=0.0,
+    )
+
+    assert summary.trades == 0
+    assert summary.final_equity == 0.0
+    assert summary.max_drawdown == 0.0
+
+
 def test_engine_liquidates_and_stops_after_nonpositive_equity() -> None:
     start = datetime(2025, 1, 1)
     bars = [

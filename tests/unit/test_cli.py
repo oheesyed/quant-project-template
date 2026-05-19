@@ -16,15 +16,27 @@ from qsa.live import runner
 
 
 class _FakeBroker:
+    requested_contracts: list[dict[str, object]] = []
+    position_symbols: list[str] = []
+    order_requests: list[dict[str, object]] = []
+
     def __init__(self, host: str, port: int, client_id: int, account: str) -> None:
         self.host = host
         self.port = port
         self.client_id = client_id
         self.account = account
 
+    @classmethod
+    def reset(cls) -> None:
+        cls.requested_contracts = []
+        cls.position_symbols = []
+        cls.order_requests = []
+
     @staticmethod
     def get_contract(symbol: str, contract_id: int, exchange: str) -> dict[str, object]:
-        return {"symbol": symbol, "contract_id": contract_id, "exchange": exchange}
+        contract = {"symbol": symbol, "contract_id": contract_id, "exchange": exchange}
+        _FakeBroker.requested_contracts.append(contract)
+        return contract
 
     async def connect(self) -> None:
         return None
@@ -61,7 +73,7 @@ class _FakeBroker:
         return pd.DataFrame(rows)
 
     def get_position(self, symbol: str) -> float:
-        del symbol
+        _FakeBroker.position_symbols.append(symbol)
         return 0.0
 
     def get_managed_accounts(self) -> list[str]:
@@ -80,8 +92,18 @@ class _FakeBroker:
         symbol: str,
         quantity: float,
         price_hint: float | None = None,
+        contract_id: int = 0,
+        exchange: str = "SMART",
     ) -> str:
-        del symbol, quantity, price_hint
+        _FakeBroker.order_requests.append(
+            {
+                "symbol": symbol,
+                "quantity": quantity,
+                "price_hint": price_hint,
+                "contract_id": contract_id,
+                "exchange": exchange,
+            }
+        )
         return "fake-order-id"
 
 
@@ -101,8 +123,10 @@ class _RejectingBroker(_FakeBroker):
         symbol: str,
         quantity: float,
         price_hint: float | None = None,
+        contract_id: int = 0,
+        exchange: str = "SMART",
     ) -> str:
-        del symbol, quantity, price_hint
+        del symbol, quantity, price_hint, contract_id, exchange
         raise RuntimeError("IBKR rejected market order 4 for TEST: status=ValidationError.")
 
 
@@ -131,6 +155,7 @@ def test_backtest_returns_mode_and_metrics(tmp_path: Path) -> None:
 
 
 def test_live_dry_run_returns_mode(tmp_path: Path) -> None:
+    _FakeBroker.reset()
     runner.TWS_Wrapper_Client = _FakeBroker
     data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment]
     config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
@@ -142,6 +167,49 @@ def test_live_dry_run_returns_mode(tmp_path: Path) -> None:
     serialized = asdict(result)
     assert serialized["signal_action"] == result.signal_action
     assert serialized["run_type"] == "live"
+
+
+def test_live_defaults_to_configured_symbol(tmp_path: Path) -> None:
+    _FakeBroker.reset()
+    runner.TWS_Wrapper_Client = _FakeBroker
+    data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+
+    result = asyncio.run(runner.run_live(config_path=config_path, dry_run=True))
+
+    assert result.symbol == "AAPL"
+    assert _FakeBroker.requested_contracts[0] == {
+        "symbol": "AAPL",
+        "contract_id": 265598,
+        "exchange": "SMART",
+    }
+    assert _FakeBroker.position_symbols == ["AAPL"]
+
+
+def test_live_symbol_override_aligns_data_position_and_order(tmp_path: Path) -> None:
+    _FakeBroker.reset()
+    runner.TWS_Wrapper_Client = _FakeBroker
+    data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+
+    result = asyncio.run(
+        runner.run_live(config_path=config_path, dry_run=False, symbol="MSFT")
+    )
+
+    assert result.symbol == "MSFT"
+    assert _FakeBroker.requested_contracts[0] == {
+        "symbol": "MSFT",
+        "contract_id": 0,
+        "exchange": "SMART",
+    }
+    assert _FakeBroker.position_symbols == ["MSFT"]
+    assert len(_FakeBroker.order_requests) == 1
+    order_request = _FakeBroker.order_requests[0]
+    assert order_request["symbol"] == "MSFT"
+    assert order_request["quantity"] == pytest.approx(100.0 / 129.0)
+    assert order_request["price_hint"] == 129.0
+    assert order_request["contract_id"] == 0
+    assert order_request["exchange"] == "SMART"
 
 
 def test_cli_live_accepts_symbol_argument() -> None:

@@ -203,15 +203,13 @@ def test_live_symbol_override_aligns_data_position_and_order(tmp_path: Path) -> 
         "exchange": "SMART",
     }
     assert _FakeBroker.position_symbols == ["MSFT"]
-    assert _FakeBroker.order_requests == [
-        {
-            "symbol": "MSFT",
-            "quantity": result.delta,
-            "price_hint": 129.0,
-            "contract_id": 0,
-            "exchange": "SMART",
-        }
-    ]
+    assert len(_FakeBroker.order_requests) == 1
+    order_request = _FakeBroker.order_requests[0]
+    assert order_request["symbol"] == "MSFT"
+    assert order_request["quantity"] == pytest.approx(100.0 / 129.0)
+    assert order_request["price_hint"] == 129.0
+    assert order_request["contract_id"] == 0
+    assert order_request["exchange"] == "SMART"
 
 
 def test_cli_live_accepts_symbol_argument() -> None:

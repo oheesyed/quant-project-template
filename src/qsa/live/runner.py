@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 
-from qsa.config.settings import load_settings
+from qsa.config.settings import Settings, load_settings
 from qsa.data.pipeline import fetch_ibkr_bars_async
 from qsa.execution.tws_client import TWS_Wrapper_Client
 from qsa.portfolio.risk import clamp_target_position
@@ -46,6 +46,22 @@ def _gross_leverage(position_shares: float, price: float, equity: float) -> floa
     return abs(position_shares * price) / equity
 
 
+def _resolve_live_settings(config_path: str, symbol: str | None) -> tuple[Settings, str]:
+    settings = load_settings(config_path)
+    execution_symbol = (symbol or settings.ib_symbol).strip()
+    if not execution_symbol:
+        raise ValueError("A live execution symbol is required.")
+
+    if execution_symbol != settings.ib_symbol:
+        settings = settings.model_copy(
+            update={
+                "ib_symbol": execution_symbol,
+                "ib_contract_id": 0,
+            }
+        )
+    return settings, execution_symbol
+
+
 async def _resolve_account_equity(
     broker: TWS_Wrapper_Client, *, attempts: int = 3, wait_s: float = 0.2
 ) -> float | None:
@@ -60,9 +76,9 @@ async def _resolve_account_equity(
 
 
 async def run_live(
-    config_path: str, dry_run: bool, symbol: str = "AAPL"
+    config_path: str, dry_run: bool, symbol: str | None = None
 ) -> LiveRunResult:
-    settings = load_settings(config_path)
+    settings, execution_symbol = _resolve_live_settings(config_path, symbol)
     bars = await fetch_ibkr_bars_async(settings)
     if not bars:
         raise ValueError("No bars loaded for live runner.")
@@ -95,7 +111,7 @@ async def run_live(
                     f"accounts: {managed_accounts}."
                 )
 
-        current_position = broker.get_position(symbol)
+        current_position = broker.get_position(execution_symbol)
         current_unit = _position_unit(current_position)
         signal = strategy.generate_signal(bars, current_position=current_unit)
         last_price = bars[-1].close
@@ -149,7 +165,7 @@ async def run_live(
         order_id = "dry-run"
         if not dry_run and delta != 0:
             order_id = await broker.place_market_order(
-                symbol=symbol, quantity=delta, price_hint=last_price
+                symbol=execution_symbol, quantity=delta, price_hint=last_price
             )
 
         return LiveRunResult(
@@ -161,7 +177,7 @@ async def run_live(
             broker=settings.broker,
             data_dir=str(settings.data_dir),
             dry_run=dry_run,
-            symbol=symbol,
+            symbol=execution_symbol,
             signal_action=signal.action,
             target_position=round(target_position, 4),
             delta=round(delta, 4),

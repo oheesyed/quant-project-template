@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import asdict
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import ClassVar
 
 import pandas as pd
 import pytest
@@ -111,6 +112,38 @@ class _UnknownAccountBroker(_FakeBroker):
         return ["DU9999999"]
 
 
+class _RecordingBroker(_FakeBroker):
+    historical_contracts: ClassVar[list[dict[str, object]]] = []
+    position_symbols: ClassVar[list[str]] = []
+    order_symbols: ClassVar[list[str]] = []
+
+    @classmethod
+    def reset(cls) -> None:
+        cls.historical_contracts = []
+        cls.position_symbols = []
+        cls.order_symbols = []
+
+    async def request_historical_data(self, *args: object, **kwargs: object) -> None:
+        del args
+        contract = kwargs["contract"]
+        assert isinstance(contract, dict)
+        self.historical_contracts.append(contract)
+
+    def get_position(self, symbol: str) -> float:
+        self.position_symbols.append(symbol)
+        return 0.0
+
+    async def place_market_order(
+        self,
+        symbol: str,
+        quantity: float,
+        price_hint: float | None = None,
+    ) -> str:
+        del quantity, price_hint
+        self.order_symbols.append(symbol)
+        return "fake-order-id"
+
+
 def _write_isolated_config(tmp_path: Path, template_path: str) -> str:
     template = Path(template_path)
     cfg = yaml.safe_load(template.read_text())
@@ -142,6 +175,23 @@ def test_live_dry_run_returns_mode(tmp_path: Path) -> None:
     serialized = asdict(result)
     assert serialized["signal_action"] == result.signal_action
     assert serialized["run_type"] == "live"
+
+
+def test_live_symbol_override_routes_data_and_order_to_same_symbol(tmp_path: Path) -> None:
+    _RecordingBroker.reset()
+    runner.TWS_Wrapper_Client = _RecordingBroker
+    data_pipeline.TWS_Wrapper_Client = _RecordingBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+
+    result = asyncio.run(
+        runner.run_live(config_path=config_path, dry_run=False, symbol="MSFT")
+    )
+
+    assert result.symbol == "MSFT"
+    assert _RecordingBroker.historical_contracts[-1]["symbol"] == "MSFT"
+    assert _RecordingBroker.historical_contracts[-1]["contract_id"] == 0
+    assert _RecordingBroker.position_symbols == ["MSFT"]
+    assert _RecordingBroker.order_symbols == ["MSFT"]
 
 
 def test_cli_live_accepts_symbol_argument() -> None:

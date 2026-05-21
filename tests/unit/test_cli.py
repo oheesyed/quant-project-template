@@ -111,6 +111,26 @@ class _UnknownAccountBroker(_FakeBroker):
         return ["DU9999999"]
 
 
+class _SymbolRecordingBroker(_FakeBroker):
+    historical_contracts: list[dict[str, object]] = []
+    positions_requested: list[str] = []
+
+    @classmethod
+    def reset(cls) -> None:
+        cls.historical_contracts = []
+        cls.positions_requested = []
+
+    async def request_historical_data(self, *args: object, **kwargs: object) -> None:
+        contract = kwargs.get("contract")
+        if contract is None and args:
+            contract = args[0]
+        self.historical_contracts.append(dict(contract))  # type: ignore[arg-type]
+
+    def get_position(self, symbol: str) -> float:
+        self.positions_requested.append(symbol)
+        return 0.0
+
+
 def _write_isolated_config(tmp_path: Path, template_path: str) -> str:
     template = Path(template_path)
     cfg = yaml.safe_load(template.read_text())
@@ -142,6 +162,38 @@ def test_live_dry_run_returns_mode(tmp_path: Path) -> None:
     serialized = asdict(result)
     assert serialized["signal_action"] == result.signal_action
     assert serialized["run_type"] == "live"
+
+
+def test_live_uses_config_symbol_when_cli_symbol_is_omitted(tmp_path: Path) -> None:
+    _SymbolRecordingBroker.reset()
+    runner.TWS_Wrapper_Client = _SymbolRecordingBroker
+    data_pipeline.TWS_Wrapper_Client = _SymbolRecordingBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+
+    result = asyncio.run(runner.run_live(config_path=config_path, dry_run=True))
+
+    assert result.symbol == "AAPL"
+    assert _SymbolRecordingBroker.historical_contracts[0]["symbol"] == "AAPL"
+    assert _SymbolRecordingBroker.historical_contracts[0]["contract_id"] == 265598
+    assert _SymbolRecordingBroker.positions_requested == ["AAPL"]
+
+
+def test_live_symbol_override_drives_data_and_execution_symbols(
+    tmp_path: Path,
+) -> None:
+    _SymbolRecordingBroker.reset()
+    runner.TWS_Wrapper_Client = _SymbolRecordingBroker
+    data_pipeline.TWS_Wrapper_Client = _SymbolRecordingBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+
+    result = asyncio.run(
+        runner.run_live(config_path=config_path, dry_run=True, symbol="MSFT")
+    )
+
+    assert result.symbol == "MSFT"
+    assert _SymbolRecordingBroker.historical_contracts[0]["symbol"] == "MSFT"
+    assert _SymbolRecordingBroker.historical_contracts[0]["contract_id"] == 0
+    assert _SymbolRecordingBroker.positions_requested == ["MSFT"]
 
 
 def test_cli_live_accepts_symbol_argument() -> None:

@@ -60,10 +60,14 @@ async def _resolve_account_equity(
 
 
 async def run_live(
-    config_path: str, dry_run: bool, symbol: str = "AAPL"
+    config_path: str, dry_run: bool, symbol: str | None = None
 ) -> LiveRunResult:
     settings = load_settings(config_path)
-    bars = await fetch_ibkr_bars_async(settings)
+    resolved_symbol = (symbol or settings.ib_symbol).strip()
+    if not resolved_symbol:
+        raise ValueError("Live execution requires a non-empty symbol.")
+
+    bars = await fetch_ibkr_bars_async(settings, symbol=resolved_symbol)
     if not bars:
         raise ValueError("No bars loaded for live runner.")
 
@@ -89,15 +93,20 @@ async def run_live(
                 raise RuntimeError(
                     "execution.account is required for non-dry-run live execution."
                 )
-            if managed_accounts and configured_account not in managed_accounts:
+            if not managed_accounts:
+                raise RuntimeError(
+                    "Unable to verify IBKR managed accounts for non-dry-run live execution."
+                )
+            if configured_account not in managed_accounts:
                 raise RuntimeError(
                     f"Configured execution.account '{configured_account}' is not in managed "
                     f"accounts: {managed_accounts}."
                 )
 
-        current_position = broker.get_position(symbol)
+        current_position = broker.get_position(resolved_symbol)
         current_unit = _position_unit(current_position)
         signal = strategy.generate_signal(bars, current_position=current_unit)
+        signal_action = signal.action
         last_price = bars[-1].close
         account_equity = await _resolve_account_equity(broker)
         if not dry_run and account_equity is None:
@@ -133,11 +142,16 @@ async def run_live(
             ):
                 target_position = current_position
                 equity_stop_blocked = True
-            elif not settings.allow_leverage and is_entry_or_flip:
+            elif is_entry_or_flip:
+                leverage_limit = (
+                    settings.max_gross_leverage
+                    if settings.allow_leverage
+                    else min(settings.max_gross_leverage, 1.0)
+                )
                 candidate_leverage = _gross_leverage(
                     candidate_target, last_price, equity_proxy
                 )
-                if candidate_leverage > settings.max_gross_leverage:
+                if candidate_leverage > leverage_limit:
                     target_position = current_position
                     leverage_blocked = True
                 else:
@@ -146,10 +160,15 @@ async def run_live(
                 target_position = candidate_target
         delta = target_position - current_position
 
-        order_id = "dry-run"
+        order_id = "dry-run" if dry_run else "no-order"
+        if not dry_run and 0 < abs(delta) < 1.0:
+            target_position = current_position
+            delta = 0.0
+            signal_action = "minimum_order_size_blocked"
+            order_id = "minimum-order-size-blocked"
         if not dry_run and delta != 0:
             order_id = await broker.place_market_order(
-                symbol=symbol, quantity=delta, price_hint=last_price
+                symbol=resolved_symbol, quantity=delta, price_hint=last_price
             )
 
         return LiveRunResult(
@@ -161,8 +180,8 @@ async def run_live(
             broker=settings.broker,
             data_dir=str(settings.data_dir),
             dry_run=dry_run,
-            symbol=symbol,
-            signal_action=signal.action,
+            symbol=resolved_symbol,
+            signal_action=signal_action,
             target_position=round(target_position, 4),
             delta=round(delta, 4),
             gross_leverage_estimate=round(

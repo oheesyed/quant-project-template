@@ -145,9 +145,14 @@ def run_engine(
                 raw_target = shares_for_unit_signal(bar.close, target_notional, signal.target_position)
                 candidate_target = clamp_target_position(raw_target, max_abs_position=max_abs_position)
                 is_entry_or_flip = signal.target_position != 0.0 and signal.target_position != current_unit
-                if not allow_leverage and is_entry_or_flip:
+                if is_entry_or_flip:
+                    leverage_limit = (
+                        max_gross_leverage
+                        if allow_leverage
+                        else min(max_gross_leverage, 1.0)
+                    )
                     candidate_leverage = _gross_leverage(candidate_target, bar.close, equity_before)
-                    if candidate_leverage > max_gross_leverage:
+                    if candidate_leverage > leverage_limit:
                         target_position = position
                         signal_action = "leverage_cap_blocked"
                     else:

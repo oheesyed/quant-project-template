@@ -111,6 +111,64 @@ class _UnknownAccountBroker(_FakeBroker):
         return ["DU9999999"]
 
 
+class _NoManagedAccountsBroker(_FakeBroker):
+    def get_managed_accounts(self) -> list[str]:
+        return []
+
+
+class _SymbolTrackingBroker(_FakeBroker):
+    requested_contracts: list[dict[str, object]] = []
+    historical_symbols: list[str] = []
+    ohlc_symbols: list[str] = []
+    position_symbols: list[str] = []
+    order_symbols: list[str] = []
+
+    @classmethod
+    def reset(cls) -> None:
+        cls.requested_contracts = []
+        cls.historical_symbols = []
+        cls.ohlc_symbols = []
+        cls.position_symbols = []
+        cls.order_symbols = []
+
+    @classmethod
+    def get_contract(
+        cls, symbol: str, contract_id: int, exchange: str
+    ) -> dict[str, object]:
+        contract = {
+            "symbol": symbol,
+            "contract_id": contract_id,
+            "exchange": exchange,
+        }
+        cls.requested_contracts.append(contract)
+        return contract
+
+    async def wait_for_historical_data(
+        self, symbol: str, timeframe: str, timeout_s: float = 30.0
+    ) -> bool:
+        del timeframe, timeout_s
+        self.__class__.historical_symbols.append(symbol)
+        return True
+
+    def get_ohlc_data(self, symbol: str, timeframe: str) -> pd.DataFrame:
+        self.__class__.ohlc_symbols.append(symbol)
+        return super().get_ohlc_data(symbol, timeframe)
+
+    def get_position(self, symbol: str) -> float:
+        self.__class__.position_symbols.append(symbol)
+        return 0.0
+
+    async def place_market_order(
+        self,
+        symbol: str,
+        quantity: float,
+        price_hint: float | None = None,
+    ) -> str:
+        del quantity, price_hint
+        self.__class__.order_symbols.append(symbol)
+        return "fake-order-id"
+
+
 def _write_isolated_config(tmp_path: Path, template_path: str) -> str:
     template = Path(template_path)
     cfg = yaml.safe_load(template.read_text())
@@ -153,6 +211,39 @@ def test_cli_live_accepts_symbol_argument() -> None:
     assert args.symbol == "AAPL"
 
 
+def test_live_uses_config_symbol_when_cli_symbol_omitted(tmp_path: Path) -> None:
+    _SymbolTrackingBroker.reset()
+    runner.TWS_Wrapper_Client = _SymbolTrackingBroker
+    data_pipeline.TWS_Wrapper_Client = _SymbolTrackingBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+    result = asyncio.run(runner.run_live(config_path=config_path, dry_run=True))
+    assert result.symbol == "AAPL"
+    assert _SymbolTrackingBroker.requested_contracts[0]["symbol"] == "AAPL"
+    assert _SymbolTrackingBroker.requested_contracts[0]["contract_id"] == 265598
+    assert _SymbolTrackingBroker.position_symbols == ["AAPL"]
+
+
+def test_live_symbol_override_drives_data_and_order_symbol(tmp_path: Path) -> None:
+    _SymbolTrackingBroker.reset()
+    runner.TWS_Wrapper_Client = _SymbolTrackingBroker
+    data_pipeline.TWS_Wrapper_Client = _SymbolTrackingBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+    cfg_path = Path(config_path)
+    cfg = yaml.safe_load(cfg_path.read_text())
+    cfg["risk"]["target_notional"] = 1_000
+    cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False))
+    result = asyncio.run(
+        runner.run_live(config_path=config_path, dry_run=False, symbol="MSFT")
+    )
+    assert result.symbol == "MSFT"
+    assert _SymbolTrackingBroker.requested_contracts[0]["symbol"] == "MSFT"
+    assert _SymbolTrackingBroker.requested_contracts[0]["contract_id"] == 0
+    assert _SymbolTrackingBroker.historical_symbols == ["MSFT"]
+    assert _SymbolTrackingBroker.ohlc_symbols == ["MSFT"]
+    assert _SymbolTrackingBroker.position_symbols == ["MSFT"]
+    assert _SymbolTrackingBroker.order_symbols == ["MSFT"]
+
+
 def test_live_non_dry_run_requires_account_equity(tmp_path: Path) -> None:
     runner.TWS_Wrapper_Client = _NoEquityBroker
     data_pipeline.TWS_Wrapper_Client = _NoEquityBroker  # type: ignore[assignment]
@@ -169,9 +260,36 @@ def test_live_non_dry_run_validates_configured_account(tmp_path: Path) -> None:
         asyncio.run(runner.run_live(config_path=config_path, dry_run=False, symbol="TEST"))
 
 
+def test_live_non_dry_run_requires_managed_accounts(tmp_path: Path) -> None:
+    runner.TWS_Wrapper_Client = _NoManagedAccountsBroker
+    data_pipeline.TWS_Wrapper_Client = _NoManagedAccountsBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+    with pytest.raises(RuntimeError, match="Unable to verify IBKR managed accounts"):
+        asyncio.run(runner.run_live(config_path=config_path, dry_run=False, symbol="TEST"))
+
+
+def test_live_non_dry_run_blocks_sub_share_delta(tmp_path: Path) -> None:
+    _SymbolTrackingBroker.reset()
+    runner.TWS_Wrapper_Client = _SymbolTrackingBroker
+    data_pipeline.TWS_Wrapper_Client = _SymbolTrackingBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+    result = asyncio.run(
+        runner.run_live(config_path=config_path, dry_run=False, symbol="AAPL")
+    )
+    assert result.signal_action == "minimum_order_size_blocked"
+    assert result.order_id == "minimum-order-size-blocked"
+    assert result.target_position == 0.0
+    assert result.delta == 0.0
+    assert _SymbolTrackingBroker.order_symbols == []
+
+
 def test_live_non_dry_run_surfaces_order_rejection(tmp_path: Path) -> None:
     runner.TWS_Wrapper_Client = _RejectingBroker
     data_pipeline.TWS_Wrapper_Client = _RejectingBroker  # type: ignore[assignment]
     config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+    cfg_path = Path(config_path)
+    cfg = yaml.safe_load(cfg_path.read_text())
+    cfg["risk"]["target_notional"] = 1_000
+    cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False))
     with pytest.raises(RuntimeError, match="IBKR rejected market order"):
         asyncio.run(runner.run_live(config_path=config_path, dry_run=False, symbol="TEST"))

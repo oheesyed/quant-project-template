@@ -4,6 +4,8 @@ import asyncio
 from types import SimpleNamespace
 from typing import Any
 
+from ib_async import Contract
+
 from qsa.execution.tws_client import TWS_Wrapper_Client
 
 
@@ -27,8 +29,9 @@ def test_market_order_binds_configured_account() -> None:
     fake_ib = _FakeIB()
     client.ib = fake_ib  # type: ignore[assignment]
 
+    contract = Contract(symbol="AAPL", secType="STK", exchange="SMART", currency="USD")
     result = asyncio.run(
-        client.send_market_order(contract=object(), action="BUY", quantity=1)
+        client.send_market_order(contract=contract, action="BUY", quantity=1)
     )
 
     assert result == {"order_id": 7}

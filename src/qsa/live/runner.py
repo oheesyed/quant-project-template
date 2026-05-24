@@ -60,12 +60,23 @@ async def _resolve_account_equity(
 
 
 async def run_live(
-    config_path: str, dry_run: bool, symbol: str = "AAPL"
+    config_path: str, dry_run: bool, symbol: str | None = None
 ) -> LiveRunResult:
     settings = load_settings(config_path)
+    configured_symbol = settings.ib_symbol.strip()
+    requested_symbol = (symbol or configured_symbol).strip()
+    if not configured_symbol:
+        raise ValueError("data.ib_symbol must be configured for live execution.")
+    if requested_symbol.upper() != configured_symbol.upper():
+        raise ValueError(
+            f"Live execution symbol {requested_symbol!r} does not match "
+            f"data.ib_symbol {configured_symbol!r}."
+        )
+    symbol = configured_symbol
+
     bars = await fetch_ibkr_bars_async(settings)
-    if not bars:
-        raise ValueError("No bars loaded for live runner.")
+    if len(bars) < 2:
+        raise ValueError("At least two bars are required for live t-1 signal execution.")
 
     strategy = MomentumExampleStrategy(
         MomentumParams(
@@ -97,7 +108,9 @@ async def run_live(
 
         current_position = broker.get_position(symbol)
         current_unit = _position_unit(current_position)
-        signal = strategy.generate_signal(bars, current_position=current_unit)
+        # Match backtest semantics: use history through t-1, then size at t.
+        signal = strategy.generate_signal(bars[:-1], current_position=current_unit)
+        signal_action = signal.action
         last_price = bars[-1].close
         account_equity = await _resolve_account_equity(broker)
         if not dry_run and account_equity is None:
@@ -113,7 +126,15 @@ async def run_live(
         leverage_blocked = False
         equity_stop_blocked = False
 
-        if signal.target_position == current_unit:
+        if (
+            settings.stop_on_nonpositive_equity
+            and equity_proxy <= 0
+            and current_position != 0
+        ):
+            target_position = 0.0
+            equity_stop_blocked = True
+            signal_action = "equity_stop_liquidation"
+        elif signal.target_position == current_unit:
             # Hold means no trade in beginner-friendly execution mode.
             target_position = current_position
         else:
@@ -123,6 +144,13 @@ async def run_live(
             candidate_target = clamp_target_position(
                 raw_target, settings.max_abs_position
             )
+            if not dry_run:
+                whole_share_target = float(int(abs(candidate_target)))
+                if candidate_target < 0:
+                    whole_share_target *= -1
+                if whole_share_target == 0.0 and candidate_target != 0.0:
+                    signal_action = "sub_share_blocked"
+                candidate_target = whole_share_target
             is_entry_or_flip = (
                 signal.target_position != 0.0 and signal.target_position != current_unit
             )
@@ -133,6 +161,7 @@ async def run_live(
             ):
                 target_position = current_position
                 equity_stop_blocked = True
+                signal_action = "equity_stop_blocked"
             elif not settings.allow_leverage and is_entry_or_flip:
                 candidate_leverage = _gross_leverage(
                     candidate_target, last_price, equity_proxy
@@ -146,10 +175,14 @@ async def run_live(
                 target_position = candidate_target
         delta = target_position - current_position
 
-        order_id = "dry-run"
+        order_id = "dry-run" if dry_run else "no-order"
         if not dry_run and delta != 0:
             order_id = await broker.place_market_order(
-                symbol=symbol, quantity=delta, price_hint=last_price
+                symbol=symbol,
+                quantity=delta,
+                price_hint=last_price,
+                contract_id=settings.ib_contract_id,
+                exchange=settings.ib_exchange,
             )
 
         return LiveRunResult(
@@ -162,7 +195,7 @@ async def run_live(
             data_dir=str(settings.data_dir),
             dry_run=dry_run,
             symbol=symbol,
-            signal_action=signal.action,
+            signal_action=signal_action,
             target_position=round(target_position, 4),
             delta=round(delta, 4),
             gross_leverage_estimate=round(

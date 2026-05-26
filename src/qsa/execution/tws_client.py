@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from datetime import date, datetime, timedelta
 from typing import Any, cast
 
@@ -13,6 +14,19 @@ def _safe_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _whole_share_order_quantity(quantity: float) -> int:
+    abs_quantity = abs(float(quantity))
+    rounded_quantity = round(abs_quantity)
+    if not math.isclose(abs_quantity, rounded_quantity, rel_tol=0.0, abs_tol=1e-9):
+        raise ValueError(
+            f"Market order quantity must be a whole number of shares. Got {quantity:.4f}."
+        )
+    whole_quantity = int(rounded_quantity)
+    if whole_quantity < 1:
+        raise ValueError(f"Market order quantity must be at least 1 share. Got {quantity:.4f}.")
+    return whole_quantity
 
 
 class TWS_Wrapper_Client:
@@ -81,7 +95,9 @@ class TWS_Wrapper_Client:
             req_id = self.req_mkt_id
             self.req_mkt_id += 1
 
-        symbol = str(getattr(contract, "localSymbol", None) or getattr(contract, "symbol", None) or req_id)
+        symbol = str(
+            getattr(contract, "localSymbol", None) or getattr(contract, "symbol", None) or req_id
+        )
         self.req_mkt_map[int(req_id)] = symbol
         self.marketdata[symbol] = self.ib.reqMktData(contract)
         await asyncio.sleep(0.01)
@@ -144,7 +160,9 @@ class TWS_Wrapper_Client:
             req_id = self.req_hist_data_id
             self.req_hist_data_id += 1
 
-        symbol = str(getattr(contract, "localSymbol", None) or getattr(contract, "symbol", None) or req_id)
+        symbol = str(
+            getattr(contract, "localSymbol", None) or getattr(contract, "symbol", None) or req_id
+        )
         timeframe = str(bar_size)
         self.req_hist_map[int(req_id)] = {"local_symbol": symbol, "timeframe": timeframe}
 
@@ -214,7 +232,9 @@ class TWS_Wrapper_Client:
         order_status = getattr(trade, "orderStatus", None)
         order_id = int(getattr(order, "orderId", 0))
         return {
-            "local_symbol": str(getattr(contract, "localSymbol", None) or getattr(contract, "symbol", "")),
+            "local_symbol": str(
+                getattr(contract, "localSymbol", None) or getattr(contract, "symbol", "")
+            ),
             "commission": _safe_float(getattr(order_status, "commission", None)),
             "commission_currency": getattr(order_status, "commissionCurrency", None),
             "completed_status": getattr(order_status, "completedStatus", None),
@@ -264,7 +284,9 @@ class TWS_Wrapper_Client:
             commission_report = getattr(fill, "commissionReport", None)
             trade_report.append(
                 {
-                    "symbol": str(getattr(contract, "localSymbol", None) or getattr(contract, "symbol", "")),
+                    "symbol": str(
+                        getattr(contract, "localSymbol", None) or getattr(contract, "symbol", "")
+                    ),
                     "time": getattr(execution, "time", None),
                     "account": getattr(execution, "acctNumber", None),
                     "action": getattr(execution, "side", None),
@@ -291,7 +313,12 @@ class TWS_Wrapper_Client:
         deadline = datetime.now() + timedelta(seconds=float(timeout_s))
         while datetime.now() < deadline:
             tf_data = self.ohlc_data.get(symbol, {}).get(timeframe)
-            if tf_data and tf_data.get("end") and hasattr(tf_data.get("data"), "empty") and not tf_data["data"].empty:
+            if (
+                tf_data
+                and tf_data.get("end")
+                and hasattr(tf_data.get("data"), "empty")
+                and not tf_data["data"].empty
+            ):
                 return True
             await asyncio.sleep(float(poll_s))
         return False
@@ -311,14 +338,13 @@ class TWS_Wrapper_Client:
         price_hint: float | None = None,
     ) -> str:
         del price_hint
-        if abs(float(quantity)) < 1.0:
-            raise ValueError(f"Market order quantity must be at least 1 share. Got {quantity:.4f}.")
+        order_quantity = _whole_share_order_quantity(quantity)
         contract = self.get_contract(symbol=symbol, contract_id=0, exchange="SMART")
         action = "BUY" if quantity > 0 else "SELL"
         result = await self.send_market_order(
             contract=contract,
             action=action,
-            quantity=abs(int(quantity)),
+            quantity=order_quantity,
             tif="DAY",
         )
         order_id = int(result["order_id"])
@@ -375,7 +401,14 @@ class TWS_Wrapper_Client:
         trade = self.get_order_by_id(int(order_id))
         if trade is None:
             return {"order_id": int(order_id)}
-        order = next((t.order for t in self.ib.trades() if int(getattr(t.order, "orderId", -1)) == int(order_id)), None)
+        order = next(
+            (
+                t.order
+                for t in self.ib.trades()
+                if int(getattr(t.order, "orderId", -1)) == int(order_id)
+            ),
+            None,
+        )
         if order is not None:
             self.ib.cancelOrder(order)
         return {"order_id": int(order_id)}
@@ -383,4 +416,3 @@ class TWS_Wrapper_Client:
     async def disconnect(self) -> None:
         if self.ib.isConnected():
             self.ib.disconnect()
-

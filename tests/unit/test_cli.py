@@ -12,7 +12,9 @@ import yaml
 from qsa.backtest.run import run_backtest
 from qsa.cli import _build_parser
 from qsa.data import pipeline as data_pipeline
+from qsa.execution.tws_client import _whole_share_order_quantity
 from qsa.live import runner
+from qsa.strategies.base import StrategySignal
 
 
 class _FakeBroker:
@@ -111,6 +113,29 @@ class _UnknownAccountBroker(_FakeBroker):
         return ["DU9999999"]
 
 
+class _RecordingBroker(_FakeBroker):
+    position_symbols: list[str] = []
+    placed_orders: list[tuple[str, float, float | None]] = []
+
+    @classmethod
+    def reset(cls) -> None:
+        cls.position_symbols = []
+        cls.placed_orders = []
+
+    def get_position(self, symbol: str) -> float:
+        type(self).position_symbols.append(symbol)
+        return 0.0
+
+    async def place_market_order(
+        self,
+        symbol: str,
+        quantity: float,
+        price_hint: float | None = None,
+    ) -> str:
+        type(self).placed_orders.append((symbol, quantity, price_hint))
+        return "fake-order-id"
+
+
 def _write_isolated_config(tmp_path: Path, template_path: str) -> str:
     template = Path(template_path)
     cfg = yaml.safe_load(template.read_text())
@@ -134,9 +159,7 @@ def test_live_dry_run_returns_mode(tmp_path: Path) -> None:
     runner.TWS_Wrapper_Client = _FakeBroker
     data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment]
     config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
-    result = asyncio.run(
-        runner.run_live(config_path=config_path, dry_run=True, symbol="TEST")
-    )
+    result = asyncio.run(runner.run_live(config_path=config_path, dry_run=True, symbol="AAPL"))
     assert result.run_type == "live"
     assert result.order_id == "dry-run"
     serialized = asdict(result)
@@ -144,13 +167,77 @@ def test_live_dry_run_returns_mode(tmp_path: Path) -> None:
     assert serialized["run_type"] == "live"
 
 
+def test_live_defaults_to_config_symbol(tmp_path: Path) -> None:
+    _RecordingBroker.reset()
+    runner.TWS_Wrapper_Client = _RecordingBroker
+    data_pipeline.TWS_Wrapper_Client = _RecordingBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+
+    result = asyncio.run(runner.run_live(config_path=config_path, dry_run=True))
+
+    assert result.symbol == "AAPL"
+    assert _RecordingBroker.position_symbols == ["AAPL"]
+
+
+def test_live_rejects_symbol_that_differs_from_data_symbol(tmp_path: Path) -> None:
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+
+    with pytest.raises(ValueError, match="must match data.ib_symbol"):
+        asyncio.run(runner.run_live(config_path=config_path, dry_run=True, symbol="MSFT"))
+
+
+def test_live_non_dry_run_refuses_backtest_mode(tmp_path: Path) -> None:
+    config_path = _write_isolated_config(tmp_path, "configs/dev.yaml")
+
+    with pytest.raises(RuntimeError, match="execution.mode='backtest'"):
+        asyncio.run(runner.run_live(config_path=config_path, dry_run=False))
+
+
+def test_live_signal_uses_previous_bar_for_backtest_parity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class _LengthRecordingStrategy:
+        def __init__(self, params: object) -> None:
+            del params
+
+        def generate_signal(self, bars: object, current_position: float) -> StrategySignal:
+            del current_position
+            return StrategySignal(target_position=0.0, action=f"bars:{len(bars)}")
+
+    runner.TWS_Wrapper_Client = _FakeBroker
+    data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment]
+    monkeypatch.setattr(runner, "MomentumExampleStrategy", _LengthRecordingStrategy)
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+
+    result = asyncio.run(runner.run_live(config_path=config_path, dry_run=True))
+
+    assert result.signal_action == "bars:29"
+
+
+def test_live_non_dry_run_places_whole_share_quantity(tmp_path: Path) -> None:
+    _RecordingBroker.reset()
+    runner.TWS_Wrapper_Client = _RecordingBroker
+    data_pipeline.TWS_Wrapper_Client = _RecordingBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+
+    result = asyncio.run(runner.run_live(config_path=config_path, dry_run=False))
+
+    assert result.target_position == 1.0
+    assert result.delta == 1.0
+    assert _RecordingBroker.placed_orders == [("AAPL", 1.0, 129.0)]
+
+
 def test_cli_live_accepts_symbol_argument() -> None:
     parser = _build_parser()
-    args = parser.parse_args(
-        ["live", "--config", "configs/paper.yaml", "--symbol", "AAPL"]
-    )
+    args = parser.parse_args(["live", "--config", "configs/paper.yaml", "--symbol", "AAPL"])
     assert args.command == "live"
     assert args.symbol == "AAPL"
+
+
+def test_tws_market_order_quantity_rejects_fractional_shares() -> None:
+    assert _whole_share_order_quantity(-2.0) == 2
+    with pytest.raises(ValueError, match="whole number of shares"):
+        _whole_share_order_quantity(1.25)
 
 
 def test_live_non_dry_run_requires_account_equity(tmp_path: Path) -> None:
@@ -158,7 +245,7 @@ def test_live_non_dry_run_requires_account_equity(tmp_path: Path) -> None:
     data_pipeline.TWS_Wrapper_Client = _NoEquityBroker  # type: ignore[assignment]
     config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
     with pytest.raises(RuntimeError, match="account_equity"):
-        asyncio.run(runner.run_live(config_path=config_path, dry_run=False, symbol="TEST"))
+        asyncio.run(runner.run_live(config_path=config_path, dry_run=False, symbol="AAPL"))
 
 
 def test_live_non_dry_run_validates_configured_account(tmp_path: Path) -> None:
@@ -166,7 +253,7 @@ def test_live_non_dry_run_validates_configured_account(tmp_path: Path) -> None:
     data_pipeline.TWS_Wrapper_Client = _UnknownAccountBroker  # type: ignore[assignment]
     config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
     with pytest.raises(RuntimeError, match="not in managed accounts"):
-        asyncio.run(runner.run_live(config_path=config_path, dry_run=False, symbol="TEST"))
+        asyncio.run(runner.run_live(config_path=config_path, dry_run=False, symbol="AAPL"))
 
 
 def test_live_non_dry_run_surfaces_order_rejection(tmp_path: Path) -> None:
@@ -174,4 +261,4 @@ def test_live_non_dry_run_surfaces_order_rejection(tmp_path: Path) -> None:
     data_pipeline.TWS_Wrapper_Client = _RejectingBroker  # type: ignore[assignment]
     config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
     with pytest.raises(RuntimeError, match="IBKR rejected market order"):
-        asyncio.run(runner.run_live(config_path=config_path, dry_run=False, symbol="TEST"))
+        asyncio.run(runner.run_live(config_path=config_path, dry_run=False, symbol="AAPL"))

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import math
 
 from qsa.config.settings import load_settings
 from qsa.data.pipeline import fetch_ibkr_bars_async
@@ -46,6 +47,31 @@ def _gross_leverage(position_shares: float, price: float, equity: float) -> floa
     return abs(position_shares * price) / equity
 
 
+def _resolve_live_symbol(config_symbol: str, requested_symbol: str | None) -> str:
+    resolved_symbol = config_symbol.strip()
+    requested = (requested_symbol or "").strip()
+    if not resolved_symbol:
+        raise ValueError("data.ib_symbol is required for live execution.")
+    if requested and requested != resolved_symbol:
+        raise ValueError(
+            f"Live --symbol '{requested}' must match data.ib_symbol "
+            f"'{resolved_symbol}' to keep signals, prices, and orders aligned."
+        )
+    return resolved_symbol
+
+
+def _whole_share_target(target: float, max_abs_position: float) -> float:
+    max_whole_shares = int(max_abs_position)
+    if max_whole_shares <= 0:
+        return 0.0
+
+    magnitude = abs(float(target))
+    rounded_magnitude = min(int(magnitude + 0.5), max_whole_shares)
+    if rounded_magnitude == 0:
+        return 0.0
+    return math.copysign(float(rounded_magnitude), target)
+
+
 async def _resolve_account_equity(
     broker: TWS_Wrapper_Client, *, attempts: int = 3, wait_s: float = 0.2
 ) -> float | None:
@@ -59,13 +85,18 @@ async def _resolve_account_equity(
     return None
 
 
-async def run_live(
-    config_path: str, dry_run: bool, symbol: str = "AAPL"
-) -> LiveRunResult:
+async def run_live(config_path: str, dry_run: bool, symbol: str | None = None) -> LiveRunResult:
     settings = load_settings(config_path)
+    live_symbol = _resolve_live_symbol(settings.ib_symbol, symbol)
+    if not dry_run and settings.mode == "backtest":
+        raise RuntimeError(
+            "Refusing to place live orders with execution.mode='backtest'. "
+            "Use a paper/live config or pass --dry-run."
+        )
+
     bars = await fetch_ibkr_bars_async(settings)
-    if not bars:
-        raise ValueError("No bars loaded for live runner.")
+    if len(bars) < 2:
+        raise ValueError("At least two bars are required for live runner.")
 
     strategy = MomentumExampleStrategy(
         MomentumParams(
@@ -86,29 +117,24 @@ async def run_live(
         managed_accounts = broker.get_managed_accounts()
         if not dry_run:
             if not configured_account:
-                raise RuntimeError(
-                    "execution.account is required for non-dry-run live execution."
-                )
+                raise RuntimeError("execution.account is required for non-dry-run live execution.")
             if managed_accounts and configured_account not in managed_accounts:
                 raise RuntimeError(
                     f"Configured execution.account '{configured_account}' is not in managed "
                     f"accounts: {managed_accounts}."
                 )
 
-        current_position = broker.get_position(symbol)
+        current_position = broker.get_position(live_symbol)
         current_unit = _position_unit(current_position)
-        signal = strategy.generate_signal(bars, current_position=current_unit)
+        signal = strategy.generate_signal(bars[:-1], current_position=current_unit)
         last_price = bars[-1].close
         account_equity = await _resolve_account_equity(broker)
         if not dry_run and account_equity is None:
             raise RuntimeError(
-                f"Unable to resolve account_equity for execution.account "
-                f"'{configured_account}'."
+                f"Unable to resolve account_equity for execution.account '{configured_account}'."
             )
         equity_proxy = (
-            float(account_equity)
-            if account_equity is not None
-            else settings.target_notional
+            float(account_equity) if account_equity is not None else settings.target_notional
         )
         leverage_blocked = False
         equity_stop_blocked = False
@@ -120,23 +146,16 @@ async def run_live(
             raw_target = shares_for_unit_signal(
                 last_price, settings.target_notional, signal.target_position
             )
-            candidate_target = clamp_target_position(
-                raw_target, settings.max_abs_position
-            )
+            candidate_target = clamp_target_position(raw_target, settings.max_abs_position)
+            candidate_target = _whole_share_target(candidate_target, settings.max_abs_position)
             is_entry_or_flip = (
                 signal.target_position != 0.0 and signal.target_position != current_unit
             )
-            if (
-                settings.stop_on_nonpositive_equity
-                and equity_proxy <= 0
-                and is_entry_or_flip
-            ):
+            if settings.stop_on_nonpositive_equity and equity_proxy <= 0 and is_entry_or_flip:
                 target_position = current_position
                 equity_stop_blocked = True
             elif not settings.allow_leverage and is_entry_or_flip:
-                candidate_leverage = _gross_leverage(
-                    candidate_target, last_price, equity_proxy
-                )
+                candidate_leverage = _gross_leverage(candidate_target, last_price, equity_proxy)
                 if candidate_leverage > settings.max_gross_leverage:
                     target_position = current_position
                     leverage_blocked = True
@@ -149,7 +168,7 @@ async def run_live(
         order_id = "dry-run"
         if not dry_run and delta != 0:
             order_id = await broker.place_market_order(
-                symbol=symbol, quantity=delta, price_hint=last_price
+                symbol=live_symbol, quantity=delta, price_hint=last_price
             )
 
         return LiveRunResult(
@@ -161,7 +180,7 @@ async def run_live(
             broker=settings.broker,
             data_dir=str(settings.data_dir),
             dry_run=dry_run,
-            symbol=symbol,
+            symbol=live_symbol,
             signal_action=signal.action,
             target_position=round(target_position, 4),
             delta=round(delta, 4),

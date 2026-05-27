@@ -60,9 +60,18 @@ async def _resolve_account_equity(
 
 
 async def run_live(
-    config_path: str, dry_run: bool, symbol: str = "AAPL"
+    config_path: str, dry_run: bool, symbol: str | None = None
 ) -> LiveRunResult:
     settings = load_settings(config_path)
+    configured_symbol = settings.ib_symbol.strip()
+    if not configured_symbol:
+        raise ValueError("data.ib_symbol is required for live execution.")
+    if symbol is not None and symbol.strip() != configured_symbol:
+        raise ValueError(
+            f"Live symbol '{symbol.strip()}' does not match data.ib_symbol "
+            f"'{configured_symbol}'. Update the config before trading a different symbol."
+        )
+    symbol = configured_symbol
     bars = await fetch_ibkr_bars_async(settings)
     if not bars:
         raise ValueError("No bars loaded for live runner.")
@@ -89,7 +98,12 @@ async def run_live(
                 raise RuntimeError(
                     "execution.account is required for non-dry-run live execution."
                 )
-            if managed_accounts and configured_account not in managed_accounts:
+            if not managed_accounts:
+                raise RuntimeError(
+                    f"Unable to validate execution.account '{configured_account}' because "
+                    "IBKR returned no managed accounts."
+                )
+            if configured_account not in managed_accounts:
                 raise RuntimeError(
                     f"Configured execution.account '{configured_account}' is not in managed "
                     f"accounts: {managed_accounts}."
@@ -148,9 +162,16 @@ async def run_live(
 
         order_id = "dry-run"
         if not dry_run and delta != 0:
-            order_id = await broker.place_market_order(
-                symbol=symbol, quantity=delta, price_hint=last_price
-            )
+            if abs(delta) < 1.0:
+                order_id = "skipped:min-order-size"
+            else:
+                order_id = await broker.place_market_order(
+                    symbol=symbol,
+                    quantity=delta,
+                    price_hint=last_price,
+                    contract_id=settings.ib_contract_id,
+                    exchange=settings.ib_exchange,
+                )
 
         return LiveRunResult(
             status="ok",

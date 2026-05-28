@@ -60,10 +60,24 @@ async def _resolve_account_equity(
 
 
 async def run_live(
-    config_path: str, dry_run: bool, symbol: str = "AAPL"
+    config_path: str, dry_run: bool, symbol: str | None = None
 ) -> LiveRunResult:
     settings = load_settings(config_path)
-    bars = await fetch_ibkr_bars_async(settings)
+    configured_symbol = settings.ib_symbol.strip()
+    live_symbol = configured_symbol if symbol is None else symbol.strip()
+    if not live_symbol:
+        raise ValueError("Live symbol cannot be empty.")
+
+    data_settings = settings
+    data_updates: dict[str, str | int] = {}
+    if live_symbol != settings.ib_symbol:
+        data_updates["ib_symbol"] = live_symbol
+    if live_symbol != configured_symbol:
+        data_updates["ib_contract_id"] = 0
+    if data_updates:
+        data_settings = settings.model_copy(update=data_updates)
+
+    bars = await fetch_ibkr_bars_async(data_settings)
     if not bars:
         raise ValueError("No bars loaded for live runner.")
 
@@ -95,7 +109,7 @@ async def run_live(
                     f"accounts: {managed_accounts}."
                 )
 
-        current_position = broker.get_position(symbol)
+        current_position = broker.get_position(live_symbol)
         current_unit = _position_unit(current_position)
         signal = strategy.generate_signal(bars, current_position=current_unit)
         last_price = bars[-1].close
@@ -149,7 +163,7 @@ async def run_live(
         order_id = "dry-run"
         if not dry_run and delta != 0:
             order_id = await broker.place_market_order(
-                symbol=symbol, quantity=delta, price_hint=last_price
+                symbol=live_symbol, quantity=delta, price_hint=last_price
             )
 
         return LiveRunResult(
@@ -161,7 +175,7 @@ async def run_live(
             broker=settings.broker,
             data_dir=str(settings.data_dir),
             dry_run=dry_run,
-            symbol=symbol,
+            symbol=live_symbol,
             signal_action=signal.action,
             target_position=round(target_position, 4),
             delta=round(delta, 4),

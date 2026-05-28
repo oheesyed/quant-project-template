@@ -106,6 +106,26 @@ class _RejectingBroker(_FakeBroker):
         raise RuntimeError("IBKR rejected market order 4 for TEST: status=ValidationError.")
 
 
+class _RecordingBroker(_FakeBroker):
+    requested_contracts: list[dict[str, object]] = []
+    position_symbols: list[str] = []
+
+    @classmethod
+    def reset(cls) -> None:
+        cls.requested_contracts = []
+        cls.position_symbols = []
+
+    @staticmethod
+    def get_contract(symbol: str, contract_id: int, exchange: str) -> dict[str, object]:
+        contract = {"symbol": symbol, "contract_id": contract_id, "exchange": exchange}
+        _RecordingBroker.requested_contracts.append(contract)
+        return contract
+
+    def get_position(self, symbol: str) -> float:
+        _RecordingBroker.position_symbols.append(symbol)
+        return 0.0
+
+
 class _UnknownAccountBroker(_FakeBroker):
     def get_managed_accounts(self) -> list[str]:
         return ["DU9999999"]
@@ -142,6 +162,36 @@ def test_live_dry_run_returns_mode(tmp_path: Path) -> None:
     serialized = asdict(result)
     assert serialized["signal_action"] == result.signal_action
     assert serialized["run_type"] == "live"
+
+
+def test_live_defaults_to_config_symbol(tmp_path: Path) -> None:
+    _RecordingBroker.reset()
+    runner.TWS_Wrapper_Client = _RecordingBroker
+    data_pipeline.TWS_Wrapper_Client = _RecordingBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+    result = asyncio.run(runner.run_live(config_path=config_path, dry_run=True))
+    assert result.symbol == "AAPL"
+    assert _RecordingBroker.requested_contracts == [
+        {"symbol": "AAPL", "contract_id": 265598, "exchange": "SMART"}
+    ]
+    assert _RecordingBroker.position_symbols == ["AAPL"]
+
+
+def test_live_symbol_override_fetches_same_symbol_without_stale_contract_id(
+    tmp_path: Path,
+) -> None:
+    _RecordingBroker.reset()
+    runner.TWS_Wrapper_Client = _RecordingBroker
+    data_pipeline.TWS_Wrapper_Client = _RecordingBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+    result = asyncio.run(
+        runner.run_live(config_path=config_path, dry_run=True, symbol="MSFT")
+    )
+    assert result.symbol == "MSFT"
+    assert _RecordingBroker.requested_contracts == [
+        {"symbol": "MSFT", "contract_id": 0, "exchange": "SMART"}
+    ]
+    assert _RecordingBroker.position_symbols == ["MSFT"]
 
 
 def test_cli_live_accepts_symbol_argument() -> None:

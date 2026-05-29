@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from datetime import UTC, datetime
+from typing import Any, cast
 
 import pandas as pd
 
@@ -60,14 +61,15 @@ def _to_bars(cleaned: pd.DataFrame) -> list[Bar]:
     """
     bars: list[Bar] = []
     for row in cleaned.itertuples(index=False):
+        row_value = cast(Any, row)
         bars.append(
             Bar(
-                time=row.time.to_pydatetime(),
-                open=float(row.open),
-                high=float(row.high),
-                low=float(row.low),
-                close=float(row.close),
-                volume=float(row.volume),
+                time=pd.Timestamp(row_value.time).to_pydatetime(),
+                open=float(row_value.open),
+                high=float(row_value.high),
+                low=float(row_value.low),
+                close=float(row_value.close),
+                volume=float(row_value.volume),
             )
         )
     return bars

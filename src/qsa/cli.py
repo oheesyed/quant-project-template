@@ -29,14 +29,14 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = _build_parser().parse_args()
     if args.command == "backtest":
-        result = run_backtest(
+        backtest_result = run_backtest(
             config_path=args.config,
             initial_cash=args.initial_cash,
             plot=args.plot,
         )
-        print(json.dumps(result, indent=2))
+        print(json.dumps(backtest_result, indent=2))
         return
-    result = asyncio.run(
+    live_result = asyncio.run(
         run_live(config_path=args.config, dry_run=args.dry_run, symbol=args.symbol)
     )
-    print(json.dumps(asdict(result), indent=2))
+    print(json.dumps(asdict(live_result), indent=2))

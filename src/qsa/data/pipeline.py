@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 
@@ -61,23 +61,26 @@ def _to_bars(cleaned: pd.DataFrame) -> list[Bar]:
     """
     bars: list[Bar] = []
     for row in cleaned.itertuples(index=False):
+        row_value = cast(Any, row)
         bars.append(
             Bar(
-                time=row.time.to_pydatetime(),
-                open=float(row.open),
-                high=float(row.high),
-                low=float(row.low),
-                close=float(row.close),
-                volume=float(row.volume),
+                time=pd.Timestamp(row_value.time).to_pydatetime(),
+                open=float(row_value.open),
+                high=float(row_value.high),
+                low=float(row_value.low),
+                close=float(row_value.close),
+                volume=float(row_value.volume),
             )
         )
     return bars
 
 
-async def _fetch_ibkr_history(settings: Settings) -> pd.DataFrame:
+async def _fetch_ibkr_history(settings: Settings, symbol: str | None = None) -> pd.DataFrame:
     """
     Fetch historical data from IBKR and return a DataFrame.
     """
+    request_symbol = symbol or settings.ib_symbol
+    contract_id = settings.ib_contract_id if request_symbol == settings.ib_symbol else 0
     client = TWS_Wrapper_Client(
         host=settings.ib_host,
         port=settings.ib_port,
@@ -87,8 +90,8 @@ async def _fetch_ibkr_history(settings: Settings) -> pd.DataFrame:
     await client.connect()
     try:
         contract = TWS_Wrapper_Client.get_contract(
-            symbol=settings.ib_symbol,
-            contract_id=settings.ib_contract_id,
+            symbol=request_symbol,
+            contract_id=contract_id,
             exchange=settings.ib_exchange,
         )
         await client.request_historical_data(
@@ -99,10 +102,10 @@ async def _fetch_ibkr_history(settings: Settings) -> pd.DataFrame:
             use_rth=settings.ib_use_rth,
             keep_up_to_date=False,
         )
-        ready = await client.wait_for_historical_data(settings.ib_symbol, settings.ib_bar_size, timeout_s=30.0)
+        ready = await client.wait_for_historical_data(request_symbol, settings.ib_bar_size, timeout_s=30.0)
         if not ready:
             raise TimeoutError("Timed out waiting for IBKR historical bars.")
-        frame = client.get_ohlc_data(settings.ib_symbol, settings.ib_bar_size).reset_index(drop=True)
+        frame = client.get_ohlc_data(request_symbol, settings.ib_bar_size).reset_index(drop=True)
         if frame.empty:
             raise ValueError("IBKR historical request returned zero rows.")
         return frame
@@ -153,7 +156,7 @@ def build_versioned_dataset(settings: Settings) -> DatasetSnapshot:
     )
 
 
-async def fetch_ibkr_bars_async(settings: Settings) -> list[Bar]:
+async def fetch_ibkr_bars_async(settings: Settings, symbol: str | None = None) -> list[Bar]:
     """
     Asynchronously fetch and process historical OHLCV data from IBKR according to the provided settings.
 
@@ -169,14 +172,14 @@ async def fetch_ibkr_bars_async(settings: Settings) -> list[Bar]:
     """
     if settings.data_source != "ibkr":
         raise ValueError(f"Unsupported data source: {settings.data_source}. Expected 'ibkr'.")
-    raw = await _fetch_ibkr_history(settings)
+    raw = await _fetch_ibkr_history(settings, symbol=symbol)
     cleaned = _clean_ohlcv(raw)
     if cleaned.empty:
         raise ValueError("No rows left after dataset cleaning.")
     return _to_bars(cleaned)
 
 
-def fetch_ibkr_bars(settings: Settings) -> list[Bar]:
+def fetch_ibkr_bars(settings: Settings, symbol: str | None = None) -> list[Bar]:
     """
     Synchronously fetch and process historical OHLCV data from IBKR.
 
@@ -189,4 +192,4 @@ def fetch_ibkr_bars(settings: Settings) -> list[Bar]:
     Returns:
         list[Bar]: List of cleaned and parsed Bar objects.
     """
-    return asyncio.run(fetch_ibkr_bars_async(settings))
+    return asyncio.run(fetch_ibkr_bars_async(settings, symbol=symbol))

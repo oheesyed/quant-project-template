@@ -85,6 +85,43 @@ class _FakeBroker:
         return "fake-order-id"
 
 
+class _SymbolTrackingBroker(_FakeBroker):
+    contract_requests: list[dict[str, object]] = []
+    history_symbols: list[str] = []
+    position_symbols: list[str] = []
+    order_symbols: list[str] = []
+
+    @classmethod
+    def reset(cls) -> None:
+        cls.contract_requests = []
+        cls.history_symbols = []
+        cls.position_symbols = []
+        cls.order_symbols = []
+
+    @staticmethod
+    def get_contract(symbol: str, contract_id: int, exchange: str) -> dict[str, object]:
+        request = {"symbol": symbol, "contract_id": contract_id, "exchange": exchange}
+        _SymbolTrackingBroker.contract_requests.append(request)
+        return request
+
+    def get_ohlc_data(self, symbol: str, timeframe: str) -> pd.DataFrame:
+        _SymbolTrackingBroker.history_symbols.append(symbol)
+        return super().get_ohlc_data(symbol, timeframe)
+
+    def get_position(self, symbol: str) -> float:
+        _SymbolTrackingBroker.position_symbols.append(symbol)
+        return super().get_position(symbol)
+
+    async def place_market_order(
+        self,
+        symbol: str,
+        quantity: float,
+        price_hint: float | None = None,
+    ) -> str:
+        _SymbolTrackingBroker.order_symbols.append(symbol)
+        return await super().place_market_order(symbol, quantity, price_hint)
+
+
 class _NoEquityBroker(_FakeBroker):
     def get_account_data(self) -> dict[str, float | None]:
         return {
@@ -142,6 +179,36 @@ def test_live_dry_run_returns_mode(tmp_path: Path) -> None:
     serialized = asdict(result)
     assert serialized["signal_action"] == result.signal_action
     assert serialized["run_type"] == "live"
+
+
+def test_live_defaults_to_config_symbol_when_cli_symbol_is_omitted(tmp_path: Path) -> None:
+    _SymbolTrackingBroker.reset()
+    runner.TWS_Wrapper_Client = _SymbolTrackingBroker
+    data_pipeline.TWS_Wrapper_Client = _SymbolTrackingBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+
+    result = asyncio.run(runner.run_live(config_path=config_path, dry_run=True, symbol=None))
+
+    assert result.symbol == "AAPL"
+    assert _SymbolTrackingBroker.contract_requests[0]["symbol"] == "AAPL"
+    assert _SymbolTrackingBroker.contract_requests[0]["contract_id"] == 265598
+    assert _SymbolTrackingBroker.history_symbols == ["AAPL"]
+    assert _SymbolTrackingBroker.position_symbols == ["AAPL"]
+
+
+def test_live_symbol_override_routes_data_and_execution_to_same_symbol(tmp_path: Path) -> None:
+    _SymbolTrackingBroker.reset()
+    runner.TWS_Wrapper_Client = _SymbolTrackingBroker
+    data_pipeline.TWS_Wrapper_Client = _SymbolTrackingBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+
+    result = asyncio.run(runner.run_live(config_path=config_path, dry_run=True, symbol="MSFT"))
+
+    assert result.symbol == "MSFT"
+    assert _SymbolTrackingBroker.contract_requests[0]["symbol"] == "MSFT"
+    assert _SymbolTrackingBroker.contract_requests[0]["contract_id"] == 0
+    assert _SymbolTrackingBroker.history_symbols == ["MSFT"]
+    assert _SymbolTrackingBroker.position_symbols == ["MSFT"]
 
 
 def test_cli_live_accepts_symbol_argument() -> None:

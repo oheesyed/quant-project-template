@@ -80,9 +80,52 @@ class _FakeBroker:
         symbol: str,
         quantity: float,
         price_hint: float | None = None,
+        contract_id: int = 0,
+        exchange: str = "SMART",
     ) -> str:
-        del symbol, quantity, price_hint
+        del symbol, quantity, price_hint, contract_id, exchange
         return "fake-order-id"
+
+
+class _RecordingBroker(_FakeBroker):
+    historical_contracts: list[dict[str, object]] = []
+    positions_requested: list[str] = []
+    orders: list[dict[str, object]] = []
+
+    @classmethod
+    def reset(cls) -> None:
+        cls.historical_contracts = []
+        cls.positions_requested = []
+        cls.orders = []
+
+    @classmethod
+    def get_contract(cls, symbol: str, contract_id: int, exchange: str) -> dict[str, object]:
+        contract = {"symbol": symbol, "contract_id": contract_id, "exchange": exchange}
+        cls.historical_contracts.append(contract)
+        return contract
+
+    def get_position(self, symbol: str) -> float:
+        self.positions_requested.append(symbol)
+        return 0.0
+
+    async def place_market_order(
+        self,
+        symbol: str,
+        quantity: float,
+        price_hint: float | None = None,
+        contract_id: int = 0,
+        exchange: str = "SMART",
+    ) -> str:
+        self.orders.append(
+            {
+                "symbol": symbol,
+                "quantity": quantity,
+                "price_hint": price_hint,
+                "contract_id": contract_id,
+                "exchange": exchange,
+            }
+        )
+        return "recorded-order-id"
 
 
 class _NoEquityBroker(_FakeBroker):
@@ -101,8 +144,10 @@ class _RejectingBroker(_FakeBroker):
         symbol: str,
         quantity: float,
         price_hint: float | None = None,
+        contract_id: int = 0,
+        exchange: str = "SMART",
     ) -> str:
-        del symbol, quantity, price_hint
+        del symbol, quantity, price_hint, contract_id, exchange
         raise RuntimeError("IBKR rejected market order 4 for TEST: status=ValidationError.")
 
 
@@ -142,6 +187,45 @@ def test_live_dry_run_returns_mode(tmp_path: Path) -> None:
     serialized = asdict(result)
     assert serialized["signal_action"] == result.signal_action
     assert serialized["run_type"] == "live"
+
+
+def test_live_uses_config_symbol_when_symbol_omitted(tmp_path: Path) -> None:
+    _RecordingBroker.reset()
+    runner.TWS_Wrapper_Client = _RecordingBroker
+    data_pipeline.TWS_Wrapper_Client = _RecordingBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+
+    result = asyncio.run(runner.run_live(config_path=config_path, dry_run=True))
+
+    assert result.symbol == "AAPL"
+    assert _RecordingBroker.historical_contracts[-1] == {
+        "symbol": "AAPL",
+        "contract_id": 265598,
+        "exchange": "SMART",
+    }
+    assert _RecordingBroker.positions_requested == ["AAPL"]
+
+
+def test_live_symbol_override_aligns_data_position_and_order(tmp_path: Path) -> None:
+    _RecordingBroker.reset()
+    runner.TWS_Wrapper_Client = _RecordingBroker
+    data_pipeline.TWS_Wrapper_Client = _RecordingBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+
+    result = asyncio.run(
+        runner.run_live(config_path=config_path, dry_run=False, symbol="TEST")
+    )
+
+    assert result.symbol == "TEST"
+    assert _RecordingBroker.historical_contracts[-1] == {
+        "symbol": "TEST",
+        "contract_id": 0,
+        "exchange": "SMART",
+    }
+    assert _RecordingBroker.positions_requested == ["TEST"]
+    assert _RecordingBroker.orders[-1]["symbol"] == "TEST"
+    assert _RecordingBroker.orders[-1]["contract_id"] == 0
+    assert _RecordingBroker.orders[-1]["exchange"] == "SMART"
 
 
 def test_cli_live_accepts_symbol_argument() -> None:

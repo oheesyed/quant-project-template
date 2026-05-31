@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import asdict
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import ClassVar
 
 import pandas as pd
 import pytest
@@ -85,6 +86,51 @@ class _FakeBroker:
         return "fake-order-id"
 
 
+class _TrackingBroker(_FakeBroker):
+    contracts: ClassVar[list[dict[str, object]]] = []
+    history_symbols: ClassVar[list[str]] = []
+    ohlc_symbols: ClassVar[list[str]] = []
+    position_symbols: ClassVar[list[str]] = []
+    order_symbols: ClassVar[list[str]] = []
+
+    @classmethod
+    def reset(cls) -> None:
+        cls.contracts = []
+        cls.history_symbols = []
+        cls.ohlc_symbols = []
+        cls.position_symbols = []
+        cls.order_symbols = []
+
+    @staticmethod
+    def get_contract(symbol: str, contract_id: int, exchange: str) -> dict[str, object]:
+        contract = {"symbol": symbol, "contract_id": contract_id, "exchange": exchange}
+        _TrackingBroker.contracts.append(contract)
+        return contract
+
+    async def wait_for_historical_data(
+        self, symbol: str, timeframe: str, timeout_s: float = 30.0
+    ) -> bool:
+        _TrackingBroker.history_symbols.append(symbol)
+        return await super().wait_for_historical_data(symbol, timeframe, timeout_s)
+
+    def get_ohlc_data(self, symbol: str, timeframe: str) -> pd.DataFrame:
+        _TrackingBroker.ohlc_symbols.append(symbol)
+        return super().get_ohlc_data(symbol, timeframe)
+
+    def get_position(self, symbol: str) -> float:
+        _TrackingBroker.position_symbols.append(symbol)
+        return super().get_position(symbol)
+
+    async def place_market_order(
+        self,
+        symbol: str,
+        quantity: float,
+        price_hint: float | None = None,
+    ) -> str:
+        _TrackingBroker.order_symbols.append(symbol)
+        return await super().place_market_order(symbol, quantity, price_hint)
+
+
 class _NoEquityBroker(_FakeBroker):
     def get_account_data(self) -> dict[str, float | None]:
         return {
@@ -142,6 +188,38 @@ def test_live_dry_run_returns_mode(tmp_path: Path) -> None:
     serialized = asdict(result)
     assert serialized["signal_action"] == result.signal_action
     assert serialized["run_type"] == "live"
+
+
+def test_live_without_symbol_uses_configured_symbol(tmp_path: Path) -> None:
+    _TrackingBroker.reset()
+    runner.TWS_Wrapper_Client = _TrackingBroker
+    data_pipeline.TWS_Wrapper_Client = _TrackingBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+    result = asyncio.run(runner.run_live(config_path=config_path, dry_run=True))
+
+    assert result.symbol == "AAPL"
+    assert _TrackingBroker.contracts[0]["symbol"] == "AAPL"
+    assert _TrackingBroker.contracts[0]["contract_id"] == 265598
+    assert _TrackingBroker.history_symbols == ["AAPL"]
+    assert _TrackingBroker.ohlc_symbols == ["AAPL"]
+    assert _TrackingBroker.position_symbols == ["AAPL"]
+
+
+def test_live_symbol_override_keeps_data_and_execution_in_sync(tmp_path: Path) -> None:
+    _TrackingBroker.reset()
+    runner.TWS_Wrapper_Client = _TrackingBroker
+    data_pipeline.TWS_Wrapper_Client = _TrackingBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+    result = asyncio.run(
+        runner.run_live(config_path=config_path, dry_run=True, symbol="MSFT")
+    )
+
+    assert result.symbol == "MSFT"
+    assert _TrackingBroker.contracts[0]["symbol"] == "MSFT"
+    assert _TrackingBroker.contracts[0]["contract_id"] == 0
+    assert _TrackingBroker.history_symbols == ["MSFT"]
+    assert _TrackingBroker.ohlc_symbols == ["MSFT"]
+    assert _TrackingBroker.position_symbols == ["MSFT"]
 
 
 def test_cli_live_accepts_symbol_argument() -> None:

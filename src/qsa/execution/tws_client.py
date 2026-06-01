@@ -300,6 +300,8 @@ class TWS_Wrapper_Client:
         self, contract: Contract, action: str, quantity: int, tif: str = "DAY"
     ) -> dict[str, int]:
         order = MarketOrder(action=str(action), totalQuantity=int(quantity), tif=str(tif))
+        if self.ib_account:
+            order.account = self.ib_account
         trade = self.ib.placeOrder(contract, order)
         await asyncio.sleep(0.01)
         return {"order_id": int(getattr(trade.order, "orderId", 0))}
@@ -347,6 +349,8 @@ class TWS_Wrapper_Client:
             tif=str(tif),
             allOrNone=bool(all_or_none),
         )
+        if self.ib_account:
+            order.account = self.ib_account
         trade = self.ib.placeOrder(contract, order)
         await asyncio.sleep(0.01)
         return {"order_id": int(getattr(trade.order, "orderId", 0))}
@@ -367,6 +371,8 @@ class TWS_Wrapper_Client:
             tif=str(tif),
             allOrNone=bool(all_or_none),
         )
+        if self.ib_account:
+            order.account = self.ib_account
         trade = self.ib.placeOrder(contract, order)
         await asyncio.sleep(0.01)
         return {"order_id": int(getattr(trade.order, "orderId", 0))}

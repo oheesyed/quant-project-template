@@ -46,6 +46,23 @@ def _gross_leverage(position_shares: float, price: float, equity: float) -> floa
     return abs(position_shares * price) / equity
 
 
+def _resolve_live_symbol(configured_symbol: str, requested_symbol: str | None) -> str:
+    data_symbol = configured_symbol.strip()
+    if not data_symbol:
+        raise ValueError("data.ib_symbol is required for live execution.")
+
+    if requested_symbol is None or not requested_symbol.strip():
+        return data_symbol
+
+    live_symbol = requested_symbol.strip()
+    if live_symbol != data_symbol:
+        raise ValueError(
+            f"Live execution symbol '{live_symbol}' must match data.ib_symbol "
+            f"'{data_symbol}' so signals and orders use the same instrument."
+        )
+    return live_symbol
+
+
 async def _resolve_account_equity(
     broker: TWS_Wrapper_Client, *, attempts: int = 3, wait_s: float = 0.2
 ) -> float | None:
@@ -60,9 +77,10 @@ async def _resolve_account_equity(
 
 
 async def run_live(
-    config_path: str, dry_run: bool, symbol: str = "AAPL"
+    config_path: str, dry_run: bool, symbol: str | None = None
 ) -> LiveRunResult:
     settings = load_settings(config_path)
+    live_symbol = _resolve_live_symbol(settings.ib_symbol, symbol)
     bars = await fetch_ibkr_bars_async(settings)
     if not bars:
         raise ValueError("No bars loaded for live runner.")
@@ -94,10 +112,15 @@ async def run_live(
                     f"Configured execution.account '{configured_account}' is not in managed "
                     f"accounts: {managed_accounts}."
                 )
+            if not managed_accounts:
+                raise RuntimeError(
+                    f"Unable to verify configured execution.account '{configured_account}' "
+                    "because IBKR returned no managed accounts."
+                )
 
-        current_position = broker.get_position(symbol)
+        current_position = broker.get_position(live_symbol)
         current_unit = _position_unit(current_position)
-        signal = strategy.generate_signal(bars, current_position=current_unit)
+        signal = strategy.generate_signal(bars[:-1], current_position=current_unit)
         last_price = bars[-1].close
         account_equity = await _resolve_account_equity(broker)
         if not dry_run and account_equity is None:
@@ -149,7 +172,7 @@ async def run_live(
         order_id = "dry-run"
         if not dry_run and delta != 0:
             order_id = await broker.place_market_order(
-                symbol=symbol, quantity=delta, price_hint=last_price
+                symbol=live_symbol, quantity=delta, price_hint=last_price
             )
 
         return LiveRunResult(
@@ -161,7 +184,7 @@ async def run_live(
             broker=settings.broker,
             data_dir=str(settings.data_dir),
             dry_run=dry_run,
-            symbol=symbol,
+            symbol=live_symbol,
             signal_action=signal.action,
             target_position=round(target_position, 4),
             delta=round(delta, 4),

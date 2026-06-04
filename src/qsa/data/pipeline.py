@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 
@@ -60,15 +60,16 @@ def _to_bars(cleaned: pd.DataFrame) -> list[Bar]:
     Convert the cleaned OHLCV DataFrame to a list of Bar objects.
     """
     bars: list[Bar] = []
-    for row in cleaned.itertuples(index=False):
+    records = cast(list[dict[str, Any]], cleaned.to_dict("records"))
+    for row in records:
         bars.append(
             Bar(
-                time=row.time.to_pydatetime(),
-                open=float(row.open),
-                high=float(row.high),
-                low=float(row.low),
-                close=float(row.close),
-                volume=float(row.volume),
+                time=pd.Timestamp(row["time"]).to_pydatetime(),
+                open=float(row["open"]),
+                high=float(row["high"]),
+                low=float(row["low"]),
+                close=float(row["close"]),
+                volume=float(row["volume"]),
             )
         )
     return bars

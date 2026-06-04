@@ -238,6 +238,10 @@ def test_live_non_dry_run_surfaces_order_rejection(tmp_path: Path) -> None:
     runner.TWS_Wrapper_Client = _RejectingBroker
     data_pipeline.TWS_Wrapper_Client = _RejectingBroker  # type: ignore[assignment]
     config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+    cfg_path = Path(config_path)
+    cfg = yaml.safe_load(cfg_path.read_text())
+    cfg["risk"]["target_notional"] = 10_000
+    cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False))
     with pytest.raises(RuntimeError, match="IBKR rejected market order"):
         asyncio.run(runner.run_live(config_path=config_path, dry_run=False, symbol="TEST"))
 

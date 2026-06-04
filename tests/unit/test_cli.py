@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import asdict
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Sequence
 
 import pandas as pd
 import pytest
@@ -12,7 +13,10 @@ import yaml
 from qsa.backtest.run import run_backtest
 from qsa.cli import _build_parser
 from qsa.data import pipeline as data_pipeline
+from qsa.execution.tws_client import TWS_Wrapper_Client
 from qsa.live import runner
+from qsa.schemas.data import Bar
+from qsa.strategies.base import StrategySignal
 
 
 class _FakeBroker:
@@ -80,8 +84,10 @@ class _FakeBroker:
         symbol: str,
         quantity: float,
         price_hint: float | None = None,
+        contract_id: int = 0,
+        exchange: str = "SMART",
     ) -> str:
-        del symbol, quantity, price_hint
+        del symbol, quantity, price_hint, contract_id, exchange
         return "fake-order-id"
 
 
@@ -101,14 +107,66 @@ class _RejectingBroker(_FakeBroker):
         symbol: str,
         quantity: float,
         price_hint: float | None = None,
+        contract_id: int = 0,
+        exchange: str = "SMART",
     ) -> str:
-        del symbol, quantity, price_hint
+        del symbol, quantity, price_hint, contract_id, exchange
         raise RuntimeError("IBKR rejected market order 4 for TEST: status=ValidationError.")
 
 
 class _UnknownAccountBroker(_FakeBroker):
     def get_managed_accounts(self) -> list[str]:
         return ["DU9999999"]
+
+
+class _NoManagedAccountsBroker(_FakeBroker):
+    def get_managed_accounts(self) -> list[str]:
+        return []
+
+
+class _RecordingBroker(_FakeBroker):
+    requested_contracts: list[dict[str, object]] = []
+    position_symbols: list[str] = []
+
+    @staticmethod
+    def get_contract(symbol: str, contract_id: int, exchange: str) -> dict[str, object]:
+        contract = {"symbol": symbol, "contract_id": contract_id, "exchange": exchange}
+        _RecordingBroker.requested_contracts.append(contract)
+        return contract
+
+    def get_position(self, symbol: str) -> float:
+        _RecordingBroker.position_symbols.append(symbol)
+        return 0.0
+
+
+class _NoFractionalOrderBroker(_FakeBroker):
+    async def place_market_order(
+        self,
+        symbol: str,
+        quantity: float,
+        price_hint: float | None = None,
+        contract_id: int = 0,
+        exchange: str = "SMART",
+    ) -> str:
+        del symbol, quantity, price_hint, contract_id, exchange
+        raise AssertionError("sub-one-share live target should not submit an order")
+
+
+class _SpyStrategy:
+    seen_lengths: list[int] = []
+    seen_last_closes: list[float | None] = []
+
+    def __init__(self, params: object) -> None:
+        del params
+
+    def generate_signal(
+        self, bars: Sequence[Bar], current_position: float
+    ) -> StrategySignal:
+        del current_position
+        bar_list = list(bars)
+        _SpyStrategy.seen_lengths.append(len(bar_list))
+        _SpyStrategy.seen_last_closes.append(bar_list[-1].close if bar_list else None)
+        return StrategySignal(target_position=0.0, action="spy")
 
 
 def _write_isolated_config(tmp_path: Path, template_path: str) -> str:
@@ -134,11 +192,10 @@ def test_live_dry_run_returns_mode(tmp_path: Path) -> None:
     runner.TWS_Wrapper_Client = _FakeBroker
     data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment]
     config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
-    result = asyncio.run(
-        runner.run_live(config_path=config_path, dry_run=True, symbol="TEST")
-    )
+    result = asyncio.run(runner.run_live(config_path=config_path, dry_run=True))
     assert result.run_type == "live"
     assert result.order_id == "dry-run"
+    assert result.symbol == "AAPL"
     serialized = asdict(result)
     assert serialized["signal_action"] == result.signal_action
     assert serialized["run_type"] == "live"
@@ -169,9 +226,74 @@ def test_live_non_dry_run_validates_configured_account(tmp_path: Path) -> None:
         asyncio.run(runner.run_live(config_path=config_path, dry_run=False, symbol="TEST"))
 
 
+def test_live_non_dry_run_rejects_unverified_account(tmp_path: Path) -> None:
+    runner.TWS_Wrapper_Client = _NoManagedAccountsBroker
+    data_pipeline.TWS_Wrapper_Client = _NoManagedAccountsBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+    with pytest.raises(RuntimeError, match="no managed accounts"):
+        asyncio.run(runner.run_live(config_path=config_path, dry_run=False, symbol="TEST"))
+
+
 def test_live_non_dry_run_surfaces_order_rejection(tmp_path: Path) -> None:
     runner.TWS_Wrapper_Client = _RejectingBroker
     data_pipeline.TWS_Wrapper_Client = _RejectingBroker  # type: ignore[assignment]
     config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
     with pytest.raises(RuntimeError, match="IBKR rejected market order"):
         asyncio.run(runner.run_live(config_path=config_path, dry_run=False, symbol="TEST"))
+
+
+def test_live_symbol_override_keeps_data_and_execution_aligned(tmp_path: Path) -> None:
+    _RecordingBroker.requested_contracts = []
+    _RecordingBroker.position_symbols = []
+    runner.TWS_Wrapper_Client = _RecordingBroker
+    data_pipeline.TWS_Wrapper_Client = _RecordingBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+
+    result = asyncio.run(
+        runner.run_live(config_path=config_path, dry_run=True, symbol="MSFT")
+    )
+
+    assert result.symbol == "MSFT"
+    assert _RecordingBroker.requested_contracts[0] == {
+        "symbol": "MSFT",
+        "contract_id": 0,
+        "exchange": "SMART",
+    }
+    assert _RecordingBroker.position_symbols == ["MSFT"]
+
+
+def test_live_signal_uses_previous_bar_to_match_backtest_timing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _SpyStrategy.seen_lengths = []
+    _SpyStrategy.seen_last_closes = []
+    runner.TWS_Wrapper_Client = _FakeBroker
+    data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment]
+    monkeypatch.setattr(runner, "MomentumExampleStrategy", _SpyStrategy)
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+
+    result = asyncio.run(runner.run_live(config_path=config_path, dry_run=True))
+
+    assert result.signal_action == "spy"
+    assert _SpyStrategy.seen_lengths == [29]
+    assert _SpyStrategy.seen_last_closes == [128]
+
+
+def test_live_non_dry_run_skips_sub_one_share_order(tmp_path: Path) -> None:
+    runner.TWS_Wrapper_Client = _NoFractionalOrderBroker
+    data_pipeline.TWS_Wrapper_Client = _NoFractionalOrderBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+
+    result = asyncio.run(runner.run_live(config_path=config_path, dry_run=False))
+
+    assert result.order_id == "none"
+    assert result.target_position == 0.0
+    assert result.delta == 0.0
+
+
+def test_market_order_rejects_fractional_quantity_before_ib_submission() -> None:
+    client = TWS_Wrapper_Client(host="127.0.0.1", port=7497, client_id=11)
+
+    with pytest.raises(ValueError, match="whole number of shares"):
+        asyncio.run(client.place_market_order(symbol="TEST", quantity=1.25))

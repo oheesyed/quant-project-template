@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from datetime import date, datetime, timedelta
 from typing import Any, cast
 
@@ -309,16 +310,34 @@ class TWS_Wrapper_Client:
         symbol: str,
         quantity: float,
         price_hint: float | None = None,
+        contract_id: int = 0,
+        exchange: str = "SMART",
     ) -> str:
         del price_hint
-        if abs(float(quantity)) < 1.0:
+        normalized_symbol = str(symbol).strip()
+        if not normalized_symbol:
+            raise ValueError("Market order symbol is required.")
+
+        quantity_value = float(quantity)
+        whole_quantity = round(quantity_value)
+        if not math.isclose(quantity_value, whole_quantity, rel_tol=0.0, abs_tol=1e-9):
+            raise ValueError(
+                f"Market order quantity must be a whole number of shares. Got {quantity:.4f}."
+            )
+        order_quantity = abs(int(whole_quantity))
+        if order_quantity < 1:
             raise ValueError(f"Market order quantity must be at least 1 share. Got {quantity:.4f}.")
-        contract = self.get_contract(symbol=symbol, contract_id=0, exchange="SMART")
-        action = "BUY" if quantity > 0 else "SELL"
+
+        contract = self.get_contract(
+            symbol=normalized_symbol,
+            contract_id=contract_id,
+            exchange=exchange,
+        )
+        action = "BUY" if quantity_value > 0 else "SELL"
         result = await self.send_market_order(
             contract=contract,
             action=action,
-            quantity=abs(int(quantity)),
+            quantity=order_quantity,
             tif="DAY",
         )
         order_id = int(result["order_id"])
@@ -327,9 +346,9 @@ class TWS_Wrapper_Client:
         status = str(order.get("status", "") if order is not None else "")
         if status in {"ValidationError", "ApiCancelled", "Cancelled", "Inactive"}:
             raise RuntimeError(
-                f"IBKR rejected market order {order_id} for {symbol}: status={status}."
+                f"IBKR rejected market order {order_id} for {normalized_symbol}: status={status}."
             )
-        return f"ibkr:{symbol}:{quantity:.4f}:{order_id}"
+        return f"ibkr:{normalized_symbol}:{quantity_value:.4f}:{order_id}"
 
     async def send_limit_order(
         self,

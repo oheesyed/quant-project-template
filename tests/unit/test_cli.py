@@ -16,6 +16,20 @@ from qsa.live import runner
 
 
 class _FakeBroker:
+    historical_requests: list[dict[str, object]] = []
+    historical_waits: list[str] = []
+    ohlc_symbols: list[str] = []
+    position_symbols: list[str] = []
+    order_symbols: list[str] = []
+
+    @classmethod
+    def reset(cls) -> None:
+        cls.historical_requests = []
+        cls.historical_waits = []
+        cls.ohlc_symbols = []
+        cls.position_symbols = []
+        cls.order_symbols = []
+
     def __init__(self, host: str, port: int, client_id: int, account: str) -> None:
         self.host = host
         self.port = port
@@ -33,17 +47,30 @@ class _FakeBroker:
         return None
 
     async def request_historical_data(self, *args: object, **kwargs: object) -> None:
-        del args, kwargs
+        del args
+        contract = kwargs.get("contract", {})
+        type(self).historical_requests.append(
+            {
+                "symbol": getattr(contract, "symbol", None)
+                if not isinstance(contract, dict)
+                else contract.get("symbol"),
+                "contract_id": getattr(contract, "conId", None)
+                if not isinstance(contract, dict)
+                else contract.get("contract_id"),
+            }
+        )
         return None
 
     async def wait_for_historical_data(
         self, symbol: str, timeframe: str, timeout_s: float = 30.0
     ) -> bool:
-        del symbol, timeframe, timeout_s
+        del timeframe, timeout_s
+        type(self).historical_waits.append(symbol)
         return True
 
     def get_ohlc_data(self, symbol: str, timeframe: str) -> pd.DataFrame:
-        del symbol, timeframe
+        del timeframe
+        type(self).ohlc_symbols.append(symbol)
         start = datetime(2025, 1, 1)
         rows: list[dict[str, object]] = []
         for idx in range(30):
@@ -61,7 +88,7 @@ class _FakeBroker:
         return pd.DataFrame(rows)
 
     def get_position(self, symbol: str) -> float:
-        del symbol
+        type(self).position_symbols.append(symbol)
         return 0.0
 
     def get_managed_accounts(self) -> list[str]:
@@ -81,7 +108,8 @@ class _FakeBroker:
         quantity: float,
         price_hint: float | None = None,
     ) -> str:
-        del symbol, quantity, price_hint
+        type(self).order_symbols.append(symbol)
+        del quantity, price_hint
         return "fake-order-id"
 
 
@@ -142,6 +170,44 @@ def test_live_dry_run_returns_mode(tmp_path: Path) -> None:
     serialized = asdict(result)
     assert serialized["signal_action"] == result.signal_action
     assert serialized["run_type"] == "live"
+
+
+def test_live_without_symbol_uses_configured_symbol_for_data_and_order(tmp_path: Path) -> None:
+    _FakeBroker.reset()
+    runner.TWS_Wrapper_Client = _FakeBroker
+    data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+
+    result = asyncio.run(runner.run_live(config_path=config_path, dry_run=False))
+
+    assert result.symbol == "AAPL"
+    assert _FakeBroker.historical_requests == [
+        {"symbol": "AAPL", "contract_id": 265598}
+    ]
+    assert _FakeBroker.historical_waits == ["AAPL"]
+    assert _FakeBroker.ohlc_symbols == ["AAPL"]
+    assert _FakeBroker.position_symbols == ["AAPL"]
+    assert _FakeBroker.order_symbols == ["AAPL"]
+
+
+def test_live_symbol_override_uses_override_for_data_and_order(tmp_path: Path) -> None:
+    _FakeBroker.reset()
+    runner.TWS_Wrapper_Client = _FakeBroker
+    data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+
+    result = asyncio.run(
+        runner.run_live(config_path=config_path, dry_run=False, symbol="MSFT")
+    )
+
+    assert result.symbol == "MSFT"
+    assert _FakeBroker.historical_requests == [
+        {"symbol": "MSFT", "contract_id": 0}
+    ]
+    assert _FakeBroker.historical_waits == ["MSFT"]
+    assert _FakeBroker.ohlc_symbols == ["MSFT"]
+    assert _FakeBroker.position_symbols == ["MSFT"]
+    assert _FakeBroker.order_symbols == ["MSFT"]
 
 
 def test_cli_live_accepts_symbol_argument() -> None:

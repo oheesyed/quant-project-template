@@ -12,6 +12,24 @@ from qsa.config.settings import Settings
 from qsa.schemas.artifacts import RunContext
 
 
+EQUITY_CURVE_COLUMNS = ["time", "equity", "position"]
+TRADES_COLUMNS = [
+    "signal_time",
+    "trade_time",
+    "action",
+    "delta",
+    "target_position",
+    "price",
+    "notional",
+    "trade_notional",
+    "commission",
+    "slippage",
+    "cash",
+    "equity",
+    "gross_leverage",
+]
+
+
 def _utc_stamp() -> str:
     return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
@@ -81,5 +99,9 @@ def save_series_artifacts(
     equity_curve: list[dict[str, Any]],
     trades: list[dict[str, Any]],
 ) -> None:
-    pd.DataFrame(equity_curve).to_csv(run_dir / "equity_curve.csv", index=False)
-    pd.DataFrame(trades).to_csv(run_dir / "trades.csv", index=False)
+    pd.DataFrame(equity_curve, columns=EQUITY_CURVE_COLUMNS).to_csv(
+        run_dir / "equity_curve.csv", index=False
+    )
+    pd.DataFrame(trades, columns=TRADES_COLUMNS).to_csv(
+        run_dir / "trades.csv", index=False
+    )

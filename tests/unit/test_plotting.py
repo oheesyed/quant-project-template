@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from qsa.backtest.plotting import generate_run_plots
+from qsa.ops.tracking import save_series_artifacts
 
 
 def _write_run_inputs(run_dir: Path) -> None:
@@ -51,3 +52,25 @@ def test_generate_run_plots_raises_when_required_file_missing(tmp_path: Path) ->
 
     with pytest.raises(FileNotFoundError):
         generate_run_plots(run_dir)
+
+
+def test_generate_run_plots_allows_empty_trades_artifact(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True)
+    save_series_artifacts(
+        run_dir,
+        equity_curve=[
+            {"time": "2025-01-01T00:00:00", "equity": 1000.0, "position": 0.0},
+            {"time": "2025-01-02T00:00:00", "equity": 1005.0, "position": 0.0},
+        ],
+        trades=[],
+    )
+    (run_dir / "metrics.json").write_text(json.dumps({"run_id": "empty-trades"}))
+
+    plot_files = generate_run_plots(run_dir)
+    trades_df = pd.read_csv(run_dir / "trades.csv")
+
+    assert trades_df.empty
+    assert {"trade_time", "delta"}.issubset(trades_df.columns)
+    for path_str in plot_files.values():
+        assert Path(path_str).exists()

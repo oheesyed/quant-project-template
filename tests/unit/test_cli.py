@@ -135,13 +135,31 @@ def test_live_dry_run_returns_mode(tmp_path: Path) -> None:
     data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment]
     config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
     result = asyncio.run(
-        runner.run_live(config_path=config_path, dry_run=True, symbol="TEST")
+        runner.run_live(config_path=config_path, dry_run=True, symbol="AAPL")
     )
     assert result.run_type == "live"
     assert result.order_id == "dry-run"
+    assert result.symbol == "AAPL"
     serialized = asdict(result)
     assert serialized["signal_action"] == result.signal_action
     assert serialized["run_type"] == "live"
+
+
+def test_live_uses_config_symbol_when_omitted(tmp_path: Path) -> None:
+    runner.TWS_Wrapper_Client = _FakeBroker
+    data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+
+    result = asyncio.run(runner.run_live(config_path=config_path, dry_run=True))
+
+    assert result.symbol == "AAPL"
+
+
+def test_live_rejects_symbol_that_does_not_match_data_config(tmp_path: Path) -> None:
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+
+    with pytest.raises(ValueError, match="does not match configured data.ib_symbol"):
+        asyncio.run(runner.run_live(config_path=config_path, dry_run=True, symbol="MSFT"))
 
 
 def test_cli_live_accepts_symbol_argument() -> None:
@@ -158,7 +176,7 @@ def test_live_non_dry_run_requires_account_equity(tmp_path: Path) -> None:
     data_pipeline.TWS_Wrapper_Client = _NoEquityBroker  # type: ignore[assignment]
     config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
     with pytest.raises(RuntimeError, match="account_equity"):
-        asyncio.run(runner.run_live(config_path=config_path, dry_run=False, symbol="TEST"))
+        asyncio.run(runner.run_live(config_path=config_path, dry_run=False, symbol="AAPL"))
 
 
 def test_live_non_dry_run_validates_configured_account(tmp_path: Path) -> None:
@@ -166,7 +184,7 @@ def test_live_non_dry_run_validates_configured_account(tmp_path: Path) -> None:
     data_pipeline.TWS_Wrapper_Client = _UnknownAccountBroker  # type: ignore[assignment]
     config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
     with pytest.raises(RuntimeError, match="not in managed accounts"):
-        asyncio.run(runner.run_live(config_path=config_path, dry_run=False, symbol="TEST"))
+        asyncio.run(runner.run_live(config_path=config_path, dry_run=False, symbol="AAPL"))
 
 
 def test_live_non_dry_run_surfaces_order_rejection(tmp_path: Path) -> None:
@@ -174,4 +192,4 @@ def test_live_non_dry_run_surfaces_order_rejection(tmp_path: Path) -> None:
     data_pipeline.TWS_Wrapper_Client = _RejectingBroker  # type: ignore[assignment]
     config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
     with pytest.raises(RuntimeError, match="IBKR rejected market order"):
-        asyncio.run(runner.run_live(config_path=config_path, dry_run=False, symbol="TEST"))
+        asyncio.run(runner.run_live(config_path=config_path, dry_run=False, symbol="AAPL"))

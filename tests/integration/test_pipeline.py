@@ -96,6 +96,6 @@ def test_backtest_then_live_dry_run_pipeline(tmp_path: Path) -> None:
     paper_config = _write_isolated_config(tmp_path, "configs/paper.yaml")
     backtest = run_backtest(dev_config, initial_cash=100_000.0)
     runner.TWS_Wrapper_Client = _FakeBroker
-    live = asyncio.run(runner.run_live(paper_config, dry_run=True, symbol="TEST"))
+    live = asyncio.run(runner.run_live(paper_config, dry_run=True))
     assert backtest["status"] == "ok"
     assert live.status == "ok"

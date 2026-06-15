@@ -127,8 +127,17 @@ async def run_live(
         )
         leverage_blocked = False
         equity_stop_blocked = False
+        signal_action = signal.action
 
-        if signal.target_position == current_unit:
+        if settings.stop_on_nonpositive_equity and equity_proxy <= 0:
+            target_position = 0.0 if current_position != 0 else current_position
+            equity_stop_blocked = True
+            signal_action = (
+                "equity_stop_liquidation"
+                if current_position != 0
+                else "equity_stop_blocked"
+            )
+        elif signal.target_position == current_unit:
             # Hold means no trade in beginner-friendly execution mode.
             target_position = current_position
         else:
@@ -148,6 +157,7 @@ async def run_live(
             ):
                 target_position = current_position
                 equity_stop_blocked = True
+                signal_action = "equity_stop_blocked"
             elif not settings.allow_leverage and is_entry_or_flip:
                 candidate_leverage = _gross_leverage(
                     candidate_target, last_price, equity_proxy
@@ -155,6 +165,7 @@ async def run_live(
                 if candidate_leverage > settings.max_gross_leverage:
                     target_position = current_position
                     leverage_blocked = True
+                    signal_action = "leverage_cap_blocked"
                 else:
                     target_position = candidate_target
             else:
@@ -177,7 +188,7 @@ async def run_live(
             data_dir=str(settings.data_dir),
             dry_run=dry_run,
             symbol=live_symbol,
-            signal_action=signal.action,
+            signal_action=signal_action,
             target_position=round(target_position, 4),
             delta=round(delta, 4),
             gross_leverage_estimate=round(

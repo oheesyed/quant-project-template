@@ -95,6 +95,20 @@ class _NoEquityBroker(_FakeBroker):
         }
 
 
+class _ZeroEquityLongBroker(_FakeBroker):
+    def get_position(self, symbol: str) -> float:
+        del symbol
+        return 5.0
+
+    def get_account_data(self) -> dict[str, float | None]:
+        return {
+            "account_balance": 0.0,
+            "account_equity": 0.0,
+            "maintenance_margin": 0.0,
+            "free_margin": 0.0,
+        }
+
+
 class _RejectingBroker(_FakeBroker):
     async def place_market_order(
         self,
@@ -160,6 +174,19 @@ def test_live_rejects_symbol_that_does_not_match_data_config(tmp_path: Path) -> 
 
     with pytest.raises(ValueError, match="does not match configured data.ib_symbol"):
         asyncio.run(runner.run_live(config_path=config_path, dry_run=True, symbol="MSFT"))
+
+
+def test_live_equity_stop_liquidates_existing_position(tmp_path: Path) -> None:
+    runner.TWS_Wrapper_Client = _ZeroEquityLongBroker
+    data_pipeline.TWS_Wrapper_Client = _ZeroEquityLongBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+
+    result = asyncio.run(runner.run_live(config_path=config_path, dry_run=True))
+
+    assert result.equity_stop_blocked is True
+    assert result.signal_action == "equity_stop_liquidation"
+    assert result.target_position == 0.0
+    assert result.delta == -5.0
 
 
 def test_cli_live_accepts_symbol_argument() -> None:

@@ -60,9 +60,19 @@ async def _resolve_account_equity(
 
 
 async def run_live(
-    config_path: str, dry_run: bool, symbol: str = "AAPL"
+    config_path: str, dry_run: bool, symbol: str | None = None
 ) -> LiveRunResult:
     settings = load_settings(config_path)
+    data_symbol = settings.ib_symbol.strip()
+    execution_symbol = data_symbol if symbol is None else symbol.strip()
+    if not execution_symbol:
+        raise ValueError("Live execution symbol cannot be empty.")
+    if execution_symbol != data_symbol:
+        raise ValueError(
+            f"Live execution symbol '{execution_symbol}' must match data.ib_symbol "
+            f"'{data_symbol}'. Update the config before trading a different instrument."
+        )
+
     bars = await fetch_ibkr_bars_async(settings)
     if not bars:
         raise ValueError("No bars loaded for live runner.")
@@ -95,9 +105,10 @@ async def run_live(
                     f"accounts: {managed_accounts}."
                 )
 
-        current_position = broker.get_position(symbol)
+        current_position = broker.get_position(execution_symbol)
         current_unit = _position_unit(current_position)
-        signal = strategy.generate_signal(bars, current_position=current_unit)
+        # Match backtest timing: signal uses history through t-1, latest bar is the fill price.
+        signal = strategy.generate_signal(bars[:-1], current_position=current_unit)
         last_price = bars[-1].close
         account_equity = await _resolve_account_equity(broker)
         if not dry_run and account_equity is None:
@@ -149,7 +160,11 @@ async def run_live(
         order_id = "dry-run"
         if not dry_run and delta != 0:
             order_id = await broker.place_market_order(
-                symbol=symbol, quantity=delta, price_hint=last_price
+                symbol=execution_symbol,
+                quantity=delta,
+                price_hint=last_price,
+                contract_id=settings.ib_contract_id,
+                exchange=settings.ib_exchange,
             )
 
         return LiveRunResult(
@@ -161,7 +176,7 @@ async def run_live(
             broker=settings.broker,
             data_dir=str(settings.data_dir),
             dry_run=dry_run,
-            symbol=symbol,
+            symbol=execution_symbol,
             signal_action=signal.action,
             target_position=round(target_position, 4),
             delta=round(delta, 4),

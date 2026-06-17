@@ -13,9 +13,13 @@ from qsa.backtest.run import run_backtest
 from qsa.cli import _build_parser
 from qsa.data import pipeline as data_pipeline
 from qsa.live import runner
+from qsa.schemas.data import Bar
+from qsa.strategies.base import StrategySignal
 
 
 class _FakeBroker:
+    last_order: dict[str, object] | None = None
+
     def __init__(self, host: str, port: int, client_id: int, account: str) -> None:
         self.host = host
         self.port = port
@@ -80,8 +84,16 @@ class _FakeBroker:
         symbol: str,
         quantity: float,
         price_hint: float | None = None,
+        contract_id: int = 0,
+        exchange: str = "SMART",
     ) -> str:
-        del symbol, quantity, price_hint
+        type(self).last_order = {
+            "symbol": symbol,
+            "quantity": quantity,
+            "price_hint": price_hint,
+            "contract_id": contract_id,
+            "exchange": exchange,
+        }
         return "fake-order-id"
 
 
@@ -101,8 +113,10 @@ class _RejectingBroker(_FakeBroker):
         symbol: str,
         quantity: float,
         price_hint: float | None = None,
+        contract_id: int = 0,
+        exchange: str = "SMART",
     ) -> str:
-        del symbol, quantity, price_hint
+        del symbol, quantity, price_hint, contract_id, exchange
         raise RuntimeError("IBKR rejected market order 4 for TEST: status=ValidationError.")
 
 
@@ -135,9 +149,10 @@ def test_live_dry_run_returns_mode(tmp_path: Path) -> None:
     data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment]
     config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
     result = asyncio.run(
-        runner.run_live(config_path=config_path, dry_run=True, symbol="TEST")
+        runner.run_live(config_path=config_path, dry_run=True)
     )
     assert result.run_type == "live"
+    assert result.symbol == "AAPL"
     assert result.order_id == "dry-run"
     serialized = asdict(result)
     assert serialized["signal_action"] == result.signal_action
@@ -153,12 +168,57 @@ def test_cli_live_accepts_symbol_argument() -> None:
     assert args.symbol == "AAPL"
 
 
+def test_live_rejects_symbol_mismatch(tmp_path: Path) -> None:
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+    with pytest.raises(ValueError, match="must match data.ib_symbol"):
+        asyncio.run(runner.run_live(config_path=config_path, dry_run=True, symbol="MSFT"))
+
+
+def test_live_signal_uses_t_minus_1_history(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+    start = datetime(2025, 1, 1)
+    bars = [
+        Bar(
+            time=start + timedelta(days=idx),
+            open=100.0 + idx,
+            high=101.0 + idx,
+            low=99.0 + idx,
+            close=100.0 + idx,
+            volume=1_000.0,
+        )
+        for idx in range(4)
+    ]
+    seen: dict[str, object] = {}
+
+    async def _fake_fetch(_: object) -> list[Bar]:
+        return bars
+
+    class _SpyStrategy:
+        def __init__(self, _: object) -> None:
+            pass
+
+        def generate_signal(self, signal_bars: list[Bar], current_position: float) -> StrategySignal:
+            del current_position
+            seen["count"] = len(signal_bars)
+            seen["last_time"] = signal_bars[-1].time if signal_bars else None
+            return StrategySignal(target_position=0.0, action="spy")
+
+    monkeypatch.setattr(runner, "fetch_ibkr_bars_async", _fake_fetch)
+    monkeypatch.setattr(runner, "MomentumExampleStrategy", _SpyStrategy)
+    monkeypatch.setattr(runner, "TWS_Wrapper_Client", _FakeBroker)
+
+    result = asyncio.run(runner.run_live(config_path=config_path, dry_run=True))
+
+    assert result.signal_action == "spy"
+    assert seen == {"count": len(bars) - 1, "last_time": bars[-2].time}
+
+
 def test_live_non_dry_run_requires_account_equity(tmp_path: Path) -> None:
     runner.TWS_Wrapper_Client = _NoEquityBroker
     data_pipeline.TWS_Wrapper_Client = _NoEquityBroker  # type: ignore[assignment]
     config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
     with pytest.raises(RuntimeError, match="account_equity"):
-        asyncio.run(runner.run_live(config_path=config_path, dry_run=False, symbol="TEST"))
+        asyncio.run(runner.run_live(config_path=config_path, dry_run=False))
 
 
 def test_live_non_dry_run_validates_configured_account(tmp_path: Path) -> None:
@@ -166,7 +226,7 @@ def test_live_non_dry_run_validates_configured_account(tmp_path: Path) -> None:
     data_pipeline.TWS_Wrapper_Client = _UnknownAccountBroker  # type: ignore[assignment]
     config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
     with pytest.raises(RuntimeError, match="not in managed accounts"):
-        asyncio.run(runner.run_live(config_path=config_path, dry_run=False, symbol="TEST"))
+        asyncio.run(runner.run_live(config_path=config_path, dry_run=False))
 
 
 def test_live_non_dry_run_surfaces_order_rejection(tmp_path: Path) -> None:
@@ -174,4 +234,20 @@ def test_live_non_dry_run_surfaces_order_rejection(tmp_path: Path) -> None:
     data_pipeline.TWS_Wrapper_Client = _RejectingBroker  # type: ignore[assignment]
     config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
     with pytest.raises(RuntimeError, match="IBKR rejected market order"):
-        asyncio.run(runner.run_live(config_path=config_path, dry_run=False, symbol="TEST"))
+        asyncio.run(runner.run_live(config_path=config_path, dry_run=False))
+
+
+def test_live_non_dry_run_uses_configured_contract(tmp_path: Path) -> None:
+    _FakeBroker.last_order = None
+    runner.TWS_Wrapper_Client = _FakeBroker
+    data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+
+    result = asyncio.run(runner.run_live(config_path=config_path, dry_run=False))
+
+    assert result.order_id == "fake-order-id"
+    assert _FakeBroker.last_order is not None
+    assert _FakeBroker.last_order["symbol"] == "AAPL"
+    assert _FakeBroker.last_order["contract_id"] == 265598
+    assert _FakeBroker.last_order["exchange"] == "SMART"
+    assert _FakeBroker.last_order["quantity"] == pytest.approx(100.0 / 129.0)

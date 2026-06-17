@@ -62,8 +62,11 @@ class TWS_Wrapper_Client:
 
     @staticmethod
     def get_contract(symbol: str, contract_id: int, exchange: str) -> Contract:
+        normalized_symbol = str(symbol).strip()
+        if not normalized_symbol:
+            raise ValueError("Contract symbol cannot be empty.")
         kwargs: dict[str, Any] = {
-            "symbol": str(symbol),
+            "symbol": normalized_symbol,
             "secType": "STK",
             "exchange": str(exchange),
             "currency": "USD",
@@ -297,9 +300,12 @@ class TWS_Wrapper_Client:
         return False
 
     async def send_market_order(
-        self, contract: Contract, action: str, quantity: int, tif: str = "DAY"
+        self, contract: Contract, action: str, quantity: float, tif: str = "DAY"
     ) -> dict[str, int]:
-        order = MarketOrder(action=str(action), totalQuantity=int(quantity), tif=str(tif))
+        order_quantity = float(quantity)
+        if order_quantity <= 0:
+            raise ValueError(f"Market order quantity must be positive. Got {quantity:.4f}.")
+        order = MarketOrder(action=str(action), totalQuantity=order_quantity, tif=str(tif))
         trade = self.ib.placeOrder(contract, order)
         await asyncio.sleep(0.01)
         return {"order_id": int(getattr(trade.order, "orderId", 0))}
@@ -309,16 +315,21 @@ class TWS_Wrapper_Client:
         symbol: str,
         quantity: float,
         price_hint: float | None = None,
+        contract_id: int = 0,
+        exchange: str = "SMART",
     ) -> str:
         del price_hint
-        if abs(float(quantity)) < 1.0:
-            raise ValueError(f"Market order quantity must be at least 1 share. Got {quantity:.4f}.")
-        contract = self.get_contract(symbol=symbol, contract_id=0, exchange="SMART")
-        action = "BUY" if quantity > 0 else "SELL"
+        order_quantity = float(quantity)
+        if order_quantity == 0.0:
+            raise ValueError(f"Market order quantity must be non-zero. Got {quantity:.4f}.")
+        contract = self.get_contract(
+            symbol=symbol, contract_id=contract_id, exchange=exchange
+        )
+        action = "BUY" if order_quantity > 0 else "SELL"
         result = await self.send_market_order(
             contract=contract,
             action=action,
-            quantity=abs(int(quantity)),
+            quantity=abs(order_quantity),
             tif="DAY",
         )
         order_id = int(result["order_id"])
@@ -329,7 +340,7 @@ class TWS_Wrapper_Client:
             raise RuntimeError(
                 f"IBKR rejected market order {order_id} for {symbol}: status={status}."
             )
-        return f"ibkr:{symbol}:{quantity:.4f}:{order_id}"
+        return f"ibkr:{symbol}:{order_quantity:.4f}:{order_id}"
 
     async def send_limit_order(
         self,

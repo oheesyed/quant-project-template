@@ -46,6 +46,20 @@ def _gross_leverage(position_shares: float, price: float, equity: float) -> floa
     return abs(position_shares * price) / equity
 
 
+def _resolve_live_symbol(configured_symbol: str, requested_symbol: str | None) -> str:
+    resolved_symbol = configured_symbol.strip()
+    if not resolved_symbol:
+        raise ValueError("data.ib_symbol is required for live execution.")
+
+    requested = (requested_symbol or "").strip()
+    if requested and requested.upper() != resolved_symbol.upper():
+        raise ValueError(
+            f"Live execution symbol '{requested}' does not match configured data.ib_symbol "
+            f"'{resolved_symbol}'. Update the config data symbol before trading a different instrument."
+        )
+    return resolved_symbol
+
+
 async def _resolve_account_equity(
     broker: TWS_Wrapper_Client, *, attempts: int = 3, wait_s: float = 0.2
 ) -> float | None:
@@ -60,9 +74,10 @@ async def _resolve_account_equity(
 
 
 async def run_live(
-    config_path: str, dry_run: bool, symbol: str = "AAPL"
+    config_path: str, dry_run: bool, symbol: str | None = None
 ) -> LiveRunResult:
     settings = load_settings(config_path)
+    live_symbol = _resolve_live_symbol(settings.ib_symbol, symbol)
     bars = await fetch_ibkr_bars_async(settings)
     if not bars:
         raise ValueError("No bars loaded for live runner.")
@@ -95,7 +110,7 @@ async def run_live(
                     f"accounts: {managed_accounts}."
                 )
 
-        current_position = broker.get_position(symbol)
+        current_position = broker.get_position(live_symbol)
         current_unit = _position_unit(current_position)
         signal = strategy.generate_signal(bars, current_position=current_unit)
         last_price = bars[-1].close
@@ -112,8 +127,17 @@ async def run_live(
         )
         leverage_blocked = False
         equity_stop_blocked = False
+        signal_action = signal.action
 
-        if signal.target_position == current_unit:
+        if settings.stop_on_nonpositive_equity and equity_proxy <= 0:
+            target_position = 0.0 if current_position != 0 else current_position
+            equity_stop_blocked = True
+            signal_action = (
+                "equity_stop_liquidation"
+                if current_position != 0
+                else "equity_stop_blocked"
+            )
+        elif signal.target_position == current_unit:
             # Hold means no trade in beginner-friendly execution mode.
             target_position = current_position
         else:
@@ -133,6 +157,7 @@ async def run_live(
             ):
                 target_position = current_position
                 equity_stop_blocked = True
+                signal_action = "equity_stop_blocked"
             elif not settings.allow_leverage and is_entry_or_flip:
                 candidate_leverage = _gross_leverage(
                     candidate_target, last_price, equity_proxy
@@ -140,6 +165,7 @@ async def run_live(
                 if candidate_leverage > settings.max_gross_leverage:
                     target_position = current_position
                     leverage_blocked = True
+                    signal_action = "leverage_cap_blocked"
                 else:
                     target_position = candidate_target
             else:
@@ -149,7 +175,7 @@ async def run_live(
         order_id = "dry-run"
         if not dry_run and delta != 0:
             order_id = await broker.place_market_order(
-                symbol=symbol, quantity=delta, price_hint=last_price
+                symbol=live_symbol, quantity=delta, price_hint=last_price
             )
 
         return LiveRunResult(
@@ -161,8 +187,8 @@ async def run_live(
             broker=settings.broker,
             data_dir=str(settings.data_dir),
             dry_run=dry_run,
-            symbol=symbol,
-            signal_action=signal.action,
+            symbol=live_symbol,
+            signal_action=signal_action,
             target_position=round(target_position, 4),
             delta=round(delta, 4),
             gross_leverage_estimate=round(

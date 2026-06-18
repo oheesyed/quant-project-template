@@ -85,6 +85,37 @@ class _FakeBroker:
         return "fake-order-id"
 
 
+class _SymbolRecordingBroker(_FakeBroker):
+    contract_requests: list[dict[str, object]] = []
+    ohlc_symbols: list[str] = []
+    position_symbols: list[str] = []
+    order_symbols: list[str] = []
+
+    @staticmethod
+    def get_contract(symbol: str, contract_id: int, exchange: str) -> dict[str, object]:
+        _SymbolRecordingBroker.contract_requests.append(
+            {"symbol": symbol, "contract_id": contract_id, "exchange": exchange}
+        )
+        return _FakeBroker.get_contract(symbol, contract_id, exchange)
+
+    def get_ohlc_data(self, symbol: str, timeframe: str) -> pd.DataFrame:
+        _SymbolRecordingBroker.ohlc_symbols.append(symbol)
+        return super().get_ohlc_data(symbol, timeframe)
+
+    def get_position(self, symbol: str) -> float:
+        _SymbolRecordingBroker.position_symbols.append(symbol)
+        return super().get_position(symbol)
+
+    async def place_market_order(
+        self,
+        symbol: str,
+        quantity: float,
+        price_hint: float | None = None,
+    ) -> str:
+        _SymbolRecordingBroker.order_symbols.append(symbol)
+        return await super().place_market_order(symbol, quantity, price_hint)
+
+
 class _NoEquityBroker(_FakeBroker):
     def get_account_data(self) -> dict[str, float | None]:
         return {
@@ -142,6 +173,28 @@ def test_live_dry_run_returns_mode(tmp_path: Path) -> None:
     serialized = asdict(result)
     assert serialized["signal_action"] == result.signal_action
     assert serialized["run_type"] == "live"
+
+
+def test_live_symbol_overrides_configured_data_symbol(tmp_path: Path) -> None:
+    _SymbolRecordingBroker.contract_requests = []
+    _SymbolRecordingBroker.ohlc_symbols = []
+    _SymbolRecordingBroker.position_symbols = []
+    _SymbolRecordingBroker.order_symbols = []
+    runner.TWS_Wrapper_Client = _SymbolRecordingBroker
+    data_pipeline.TWS_Wrapper_Client = _SymbolRecordingBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+
+    result = asyncio.run(
+        runner.run_live(config_path=config_path, dry_run=False, symbol="TEST")
+    )
+
+    assert result.symbol == "TEST"
+    assert _SymbolRecordingBroker.contract_requests == [
+        {"symbol": "TEST", "contract_id": 0, "exchange": "SMART"}
+    ]
+    assert _SymbolRecordingBroker.ohlc_symbols == ["TEST"]
+    assert _SymbolRecordingBroker.position_symbols == ["TEST"]
+    assert _SymbolRecordingBroker.order_symbols == ["TEST"]
 
 
 def test_cli_live_accepts_symbol_argument() -> None:

@@ -16,6 +16,10 @@ from qsa.live import runner
 
 
 class _FakeBroker:
+    contract_requests: list[dict[str, object]] = []
+    position_symbols: list[str] = []
+    order_symbols: list[str] = []
+
     def __init__(self, host: str, port: int, client_id: int, account: str) -> None:
         self.host = host
         self.port = port
@@ -24,6 +28,9 @@ class _FakeBroker:
 
     @staticmethod
     def get_contract(symbol: str, contract_id: int, exchange: str) -> dict[str, object]:
+        _FakeBroker.contract_requests.append(
+            {"symbol": symbol, "contract_id": contract_id, "exchange": exchange}
+        )
         return {"symbol": symbol, "contract_id": contract_id, "exchange": exchange}
 
     async def connect(self) -> None:
@@ -61,7 +68,7 @@ class _FakeBroker:
         return pd.DataFrame(rows)
 
     def get_position(self, symbol: str) -> float:
-        del symbol
+        _FakeBroker.position_symbols.append(symbol)
         return 0.0
 
     def get_managed_accounts(self) -> list[str]:
@@ -81,7 +88,8 @@ class _FakeBroker:
         quantity: float,
         price_hint: float | None = None,
     ) -> str:
-        del symbol, quantity, price_hint
+        del quantity, price_hint
+        _FakeBroker.order_symbols.append(symbol)
         return "fake-order-id"
 
 
@@ -133,15 +141,34 @@ def test_backtest_returns_mode_and_metrics(tmp_path: Path) -> None:
 def test_live_dry_run_returns_mode(tmp_path: Path) -> None:
     runner.TWS_Wrapper_Client = _FakeBroker
     data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment]
+    _FakeBroker.contract_requests = []
+    _FakeBroker.position_symbols = []
     config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
     result = asyncio.run(
         runner.run_live(config_path=config_path, dry_run=True, symbol="TEST")
     )
     assert result.run_type == "live"
     assert result.order_id == "dry-run"
+    assert result.symbol == "TEST"
+    assert _FakeBroker.contract_requests[-1]["symbol"] == "TEST"
+    assert _FakeBroker.contract_requests[-1]["contract_id"] == 0
+    assert _FakeBroker.position_symbols[-1] == "TEST"
     serialized = asdict(result)
     assert serialized["signal_action"] == result.signal_action
     assert serialized["run_type"] == "live"
+
+
+def test_live_defaults_to_config_symbol(tmp_path: Path) -> None:
+    runner.TWS_Wrapper_Client = _FakeBroker
+    data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment]
+    _FakeBroker.contract_requests = []
+    _FakeBroker.position_symbols = []
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+    result = asyncio.run(runner.run_live(config_path=config_path, dry_run=True))
+    assert result.symbol == "AAPL"
+    assert _FakeBroker.contract_requests[-1]["symbol"] == "AAPL"
+    assert _FakeBroker.contract_requests[-1]["contract_id"] == 265598
+    assert _FakeBroker.position_symbols[-1] == "AAPL"
 
 
 def test_cli_live_accepts_symbol_argument() -> None:

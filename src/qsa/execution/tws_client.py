@@ -311,14 +311,20 @@ class TWS_Wrapper_Client:
         price_hint: float | None = None,
     ) -> str:
         del price_hint
-        if abs(float(quantity)) < 1.0:
+        quantity_value = float(quantity)
+        if not quantity_value.is_integer():
+            raise ValueError(
+                f"Market order quantity must be a whole number of shares. Got {quantity:.4f}."
+            )
+        quantity_int = int(quantity_value)
+        if abs(quantity_int) < 1:
             raise ValueError(f"Market order quantity must be at least 1 share. Got {quantity:.4f}.")
         contract = self.get_contract(symbol=symbol, contract_id=0, exchange="SMART")
-        action = "BUY" if quantity > 0 else "SELL"
+        action = "BUY" if quantity_int > 0 else "SELL"
         result = await self.send_market_order(
             contract=contract,
             action=action,
-            quantity=abs(int(quantity)),
+            quantity=abs(quantity_int),
             tif="DAY",
         )
         order_id = int(result["order_id"])

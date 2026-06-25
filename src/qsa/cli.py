@@ -21,7 +21,7 @@ def _build_parser() -> argparse.ArgumentParser:
     live = sub.add_parser("live", help="Run live scaffold.")
     live.add_argument("--config", default="configs/paper.yaml")
     live.add_argument("--dry-run", action="store_true")
-    live.add_argument("--symbol")
+    live.add_argument("--symbol", help="Optional guard; must match data.ib_symbol in the config.")
 
     return parser
 

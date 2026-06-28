@@ -75,8 +75,10 @@ class _FakeBroker:
         symbol: str,
         quantity: float,
         price_hint: float | None = None,
+        contract_id: int = 0,
+        exchange: str = "SMART",
     ) -> str:
-        del symbol, quantity, price_hint
+        del symbol, quantity, price_hint, contract_id, exchange
         return "fake-order-id"
 
 
@@ -91,11 +93,11 @@ def _write_isolated_config(tmp_path: Path, template_path: str) -> str:
 
 
 def test_backtest_then_live_dry_run_pipeline(tmp_path: Path) -> None:
-    data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment]
+    data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment,misc]
     dev_config = _write_isolated_config(tmp_path, "configs/dev.yaml")
     paper_config = _write_isolated_config(tmp_path, "configs/paper.yaml")
     backtest = run_backtest(dev_config, initial_cash=100_000.0)
-    runner.TWS_Wrapper_Client = _FakeBroker
-    live = asyncio.run(runner.run_live(paper_config, dry_run=True, symbol="TEST"))
+    runner.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment,misc]
+    live = asyncio.run(runner.run_live(paper_config, dry_run=True, symbol="AAPL"))
     assert backtest["status"] == "ok"
     assert live.status == "ok"

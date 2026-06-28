@@ -63,7 +63,7 @@ def _write_isolated_config(tmp_path: Path, template_path: str) -> str:
 
 
 def test_backtest_persists_run_artifacts(tmp_path: Path) -> None:
-    data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment]
+    data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment,misc]
     config_path = _write_isolated_config(tmp_path, "configs/dev.yaml")
     result = run_backtest(config_path, initial_cash=100_000.0)
     run_dir = Path(result["run_dir"])
@@ -97,7 +97,7 @@ def test_backtest_persists_run_artifacts(tmp_path: Path) -> None:
 
 
 def test_backtest_with_plot_creates_chart_artifacts(tmp_path: Path) -> None:
-    data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment]
+    data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment,misc]
     config_path = _write_isolated_config(tmp_path, "configs/dev.yaml")
     result = run_backtest(config_path, initial_cash=100_000.0, plot=True)
     run_dir = Path(result["run_dir"])
@@ -113,7 +113,7 @@ def test_backtest_with_plot_creates_chart_artifacts(tmp_path: Path) -> None:
 
 
 def test_backtest_writes_dataset_artifacts_inside_run_dir(tmp_path: Path) -> None:
-    data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment]
+    data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment,misc]
     config_path = _write_isolated_config(tmp_path, "configs/dev.yaml")
     result = run_backtest(config_path, initial_cash=100_000.0)
 

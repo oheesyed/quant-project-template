@@ -150,7 +150,7 @@ def _write_isolated_config(tmp_path: Path, template_path: str) -> str:
 
 
 def test_backtest_returns_mode_and_metrics(tmp_path: Path) -> None:
-    data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment]
+    data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment,misc]
     config_path = _write_isolated_config(tmp_path, "configs/dev.yaml")
     result = run_backtest(config_path=config_path)
     assert result["run_type"] == "backtest"
@@ -159,8 +159,8 @@ def test_backtest_returns_mode_and_metrics(tmp_path: Path) -> None:
 
 
 def test_live_dry_run_returns_mode(tmp_path: Path) -> None:
-    runner.TWS_Wrapper_Client = _FakeBroker
-    data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment]
+    runner.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment,misc]
+    data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment,misc]
     config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
     result = asyncio.run(
         runner.run_live(config_path=config_path, dry_run=True, symbol="AAPL")
@@ -173,8 +173,8 @@ def test_live_dry_run_returns_mode(tmp_path: Path) -> None:
 
 
 def test_live_uses_configured_symbol_when_cli_omits_symbol(tmp_path: Path) -> None:
-    runner.TWS_Wrapper_Client = _FakeBroker
-    data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment]
+    runner.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment,misc]
+    data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment,misc]
     config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
 
     result = asyncio.run(
@@ -201,24 +201,24 @@ def test_cli_live_accepts_symbol_argument() -> None:
 
 
 def test_live_non_dry_run_requires_account_equity(tmp_path: Path) -> None:
-    runner.TWS_Wrapper_Client = _NoEquityBroker
-    data_pipeline.TWS_Wrapper_Client = _NoEquityBroker  # type: ignore[assignment]
+    runner.TWS_Wrapper_Client = _NoEquityBroker  # type: ignore[assignment,misc]
+    data_pipeline.TWS_Wrapper_Client = _NoEquityBroker  # type: ignore[assignment,misc]
     config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
     with pytest.raises(RuntimeError, match="account_equity"):
         asyncio.run(runner.run_live(config_path=config_path, dry_run=False, symbol="AAPL"))
 
 
 def test_live_non_dry_run_validates_configured_account(tmp_path: Path) -> None:
-    runner.TWS_Wrapper_Client = _UnknownAccountBroker
-    data_pipeline.TWS_Wrapper_Client = _UnknownAccountBroker  # type: ignore[assignment]
+    runner.TWS_Wrapper_Client = _UnknownAccountBroker  # type: ignore[assignment,misc]
+    data_pipeline.TWS_Wrapper_Client = _UnknownAccountBroker  # type: ignore[assignment,misc]
     config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
     with pytest.raises(RuntimeError, match="not in managed accounts"):
         asyncio.run(runner.run_live(config_path=config_path, dry_run=False, symbol="AAPL"))
 
 
 def test_live_non_dry_run_surfaces_order_rejection(tmp_path: Path) -> None:
-    runner.TWS_Wrapper_Client = _RejectingBroker
-    data_pipeline.TWS_Wrapper_Client = _RejectingBroker  # type: ignore[assignment]
+    runner.TWS_Wrapper_Client = _RejectingBroker  # type: ignore[assignment,misc]
+    data_pipeline.TWS_Wrapper_Client = _RejectingBroker  # type: ignore[assignment,misc]
     config_path = Path(_write_isolated_config(tmp_path, "configs/paper.yaml"))
     cfg = yaml.safe_load(config_path.read_text())
     cfg["risk"]["target_notional"] = 250
@@ -228,8 +228,8 @@ def test_live_non_dry_run_surfaces_order_rejection(tmp_path: Path) -> None:
 
 
 def test_live_non_dry_run_skips_sub_share_order(tmp_path: Path) -> None:
-    runner.TWS_Wrapper_Client = _RecordingBroker
-    data_pipeline.TWS_Wrapper_Client = _RecordingBroker  # type: ignore[assignment]
+    runner.TWS_Wrapper_Client = _RecordingBroker  # type: ignore[assignment,misc]
+    data_pipeline.TWS_Wrapper_Client = _RecordingBroker  # type: ignore[assignment,misc]
     _RecordingBroker.orders = []
     config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
 
@@ -244,8 +244,8 @@ def test_live_non_dry_run_skips_sub_share_order(tmp_path: Path) -> None:
 
 
 def test_live_non_dry_run_places_whole_share_quantity(tmp_path: Path) -> None:
-    runner.TWS_Wrapper_Client = _RecordingBroker
-    data_pipeline.TWS_Wrapper_Client = _RecordingBroker  # type: ignore[assignment]
+    runner.TWS_Wrapper_Client = _RecordingBroker  # type: ignore[assignment,misc]
+    data_pipeline.TWS_Wrapper_Client = _RecordingBroker  # type: ignore[assignment,misc]
     _RecordingBroker.orders = []
     config_path = Path(_write_isolated_config(tmp_path, "configs/paper.yaml"))
     cfg = yaml.safe_load(config_path.read_text())

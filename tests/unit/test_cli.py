@@ -16,6 +16,16 @@ from qsa.live import runner
 
 
 class _FakeBroker:
+    position_symbols: list[str] = []
+    order_symbols: list[str] = []
+    order_quantities: list[float] = []
+
+    @classmethod
+    def reset(cls) -> None:
+        cls.position_symbols = []
+        cls.order_symbols = []
+        cls.order_quantities = []
+
     def __init__(self, host: str, port: int, client_id: int, account: str) -> None:
         self.host = host
         self.port = port
@@ -61,7 +71,7 @@ class _FakeBroker:
         return pd.DataFrame(rows)
 
     def get_position(self, symbol: str) -> float:
-        del symbol
+        self.position_symbols.append(symbol)
         return 0.0
 
     def get_managed_accounts(self) -> list[str]:
@@ -81,7 +91,9 @@ class _FakeBroker:
         quantity: float,
         price_hint: float | None = None,
     ) -> str:
-        del symbol, quantity, price_hint
+        del price_hint
+        self.order_symbols.append(symbol)
+        self.order_quantities.append(quantity)
         return "fake-order-id"
 
 
@@ -111,11 +123,15 @@ class _UnknownAccountBroker(_FakeBroker):
         return ["DU9999999"]
 
 
-def _write_isolated_config(tmp_path: Path, template_path: str) -> str:
+def _write_isolated_config(
+    tmp_path: Path, template_path: str, *, target_notional: float | None = None
+) -> str:
     template = Path(template_path)
     cfg = yaml.safe_load(template.read_text())
     data_root = tmp_path / "data"
     cfg["data"]["root"] = str(data_root)
+    if target_notional is not None:
+        cfg["risk"]["target_notional"] = target_notional
     out_path = tmp_path / template.name
     out_path.write_text(yaml.safe_dump(cfg, sort_keys=False))
     return str(out_path)
@@ -131,14 +147,15 @@ def test_backtest_returns_mode_and_metrics(tmp_path: Path) -> None:
 
 
 def test_live_dry_run_returns_mode(tmp_path: Path) -> None:
+    _FakeBroker.reset()
     runner.TWS_Wrapper_Client = _FakeBroker
     data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment]
     config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
-    result = asyncio.run(
-        runner.run_live(config_path=config_path, dry_run=True, symbol="TEST")
-    )
+    result = asyncio.run(runner.run_live(config_path=config_path, dry_run=True))
     assert result.run_type == "live"
     assert result.order_id == "dry-run"
+    assert result.symbol == "AAPL"
+    assert _FakeBroker.position_symbols == ["AAPL"]
     serialized = asdict(result)
     assert serialized["signal_action"] == result.signal_action
     assert serialized["run_type"] == "live"
@@ -153,12 +170,25 @@ def test_cli_live_accepts_symbol_argument() -> None:
     assert args.symbol == "AAPL"
 
 
+def test_cli_live_symbol_defaults_to_configured_instrument() -> None:
+    parser = _build_parser()
+    args = parser.parse_args(["live", "--config", "configs/paper.yaml"])
+    assert args.command == "live"
+    assert args.symbol is None
+
+
+def test_live_rejects_symbol_mismatch(tmp_path: Path) -> None:
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+    with pytest.raises(ValueError, match="must match data.ib_symbol"):
+        asyncio.run(runner.run_live(config_path=config_path, dry_run=True, symbol="MSFT"))
+
+
 def test_live_non_dry_run_requires_account_equity(tmp_path: Path) -> None:
     runner.TWS_Wrapper_Client = _NoEquityBroker
     data_pipeline.TWS_Wrapper_Client = _NoEquityBroker  # type: ignore[assignment]
     config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
     with pytest.raises(RuntimeError, match="account_equity"):
-        asyncio.run(runner.run_live(config_path=config_path, dry_run=False, symbol="TEST"))
+        asyncio.run(runner.run_live(config_path=config_path, dry_run=False))
 
 
 def test_live_non_dry_run_validates_configured_account(tmp_path: Path) -> None:
@@ -166,12 +196,26 @@ def test_live_non_dry_run_validates_configured_account(tmp_path: Path) -> None:
     data_pipeline.TWS_Wrapper_Client = _UnknownAccountBroker  # type: ignore[assignment]
     config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
     with pytest.raises(RuntimeError, match="not in managed accounts"):
-        asyncio.run(runner.run_live(config_path=config_path, dry_run=False, symbol="TEST"))
+        asyncio.run(runner.run_live(config_path=config_path, dry_run=False))
 
 
 def test_live_non_dry_run_surfaces_order_rejection(tmp_path: Path) -> None:
     runner.TWS_Wrapper_Client = _RejectingBroker
     data_pipeline.TWS_Wrapper_Client = _RejectingBroker  # type: ignore[assignment]
-    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+    config_path = _write_isolated_config(
+        tmp_path, "configs/paper.yaml", target_notional=10_000.0
+    )
     with pytest.raises(RuntimeError, match="IBKR rejected market order"):
-        asyncio.run(runner.run_live(config_path=config_path, dry_run=False, symbol="TEST"))
+        asyncio.run(runner.run_live(config_path=config_path, dry_run=False))
+
+
+def test_live_non_dry_run_skips_sub_share_entry(tmp_path: Path) -> None:
+    _FakeBroker.reset()
+    runner.TWS_Wrapper_Client = _FakeBroker
+    data_pipeline.TWS_Wrapper_Client = _FakeBroker  # type: ignore[assignment]
+    config_path = _write_isolated_config(tmp_path, "configs/paper.yaml")
+    result = asyncio.run(runner.run_live(config_path=config_path, dry_run=False))
+    assert result.order_id == "no-order"
+    assert result.delta == 0.0
+    assert result.target_position == 0.0
+    assert _FakeBroker.order_quantities == []

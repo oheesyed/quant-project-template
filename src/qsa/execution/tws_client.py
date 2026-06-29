@@ -311,14 +311,20 @@ class TWS_Wrapper_Client:
         price_hint: float | None = None,
     ) -> str:
         del price_hint
-        if abs(float(quantity)) < 1.0:
+        quantity_value = float(quantity)
+        if not quantity_value.is_integer():
+            raise ValueError(
+                f"Market order quantity must be a whole-share quantity. Got {quantity:.4f}."
+            )
+        whole_quantity = abs(int(quantity_value))
+        if whole_quantity < 1:
             raise ValueError(f"Market order quantity must be at least 1 share. Got {quantity:.4f}.")
         contract = self.get_contract(symbol=symbol, contract_id=0, exchange="SMART")
-        action = "BUY" if quantity > 0 else "SELL"
+        action = "BUY" if quantity_value > 0 else "SELL"
         result = await self.send_market_order(
             contract=contract,
             action=action,
-            quantity=abs(int(quantity)),
+            quantity=whole_quantity,
             tif="DAY",
         )
         order_id = int(result["order_id"])
@@ -329,7 +335,7 @@ class TWS_Wrapper_Client:
             raise RuntimeError(
                 f"IBKR rejected market order {order_id} for {symbol}: status={status}."
             )
-        return f"ibkr:{symbol}:{quantity:.4f}:{order_id}"
+        return f"ibkr:{symbol}:{quantity_value:.0f}:{order_id}"
 
     async def send_limit_order(
         self,

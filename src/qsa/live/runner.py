@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from math import floor
 
 from qsa.config.settings import load_settings
 from qsa.data.pipeline import fetch_ibkr_bars_async
@@ -59,10 +60,37 @@ async def _resolve_account_equity(
     return None
 
 
+def _resolve_trade_symbol(config_symbol: str, requested_symbol: str | None) -> str:
+    trade_symbol = str(config_symbol).strip()
+    if not trade_symbol:
+        raise ValueError("data.ib_symbol is required for live execution.")
+
+    requested = str(requested_symbol).strip() if requested_symbol is not None else ""
+    if requested and requested != trade_symbol:
+        raise ValueError(
+            f"Live symbol '{requested}' must match configured data.ib_symbol '{trade_symbol}'."
+        )
+    return trade_symbol
+
+
+def _whole_share_target(position_shares: float) -> float:
+    if position_shares == 0:
+        return 0.0
+    side = 1.0 if position_shares > 0 else -1.0
+    return side * float(floor(abs(position_shares)))
+
+
 async def run_live(
-    config_path: str, dry_run: bool, symbol: str = "AAPL"
+    config_path: str, dry_run: bool, symbol: str | None = None
 ) -> LiveRunResult:
     settings = load_settings(config_path)
+    trade_symbol = _resolve_trade_symbol(settings.ib_symbol, symbol)
+    if not dry_run and settings.mode not in {"paper", "live"}:
+        raise RuntimeError(
+            "Live execution requires execution.mode to be 'paper' or 'live'. "
+            f"Got '{settings.mode}'."
+        )
+
     bars = await fetch_ibkr_bars_async(settings)
     if not bars:
         raise ValueError("No bars loaded for live runner.")
@@ -89,13 +117,13 @@ async def run_live(
                 raise RuntimeError(
                     "execution.account is required for non-dry-run live execution."
                 )
-            if managed_accounts and configured_account not in managed_accounts:
+            if configured_account not in managed_accounts:
                 raise RuntimeError(
                     f"Configured execution.account '{configured_account}' is not in managed "
                     f"accounts: {managed_accounts}."
                 )
 
-        current_position = broker.get_position(symbol)
+        current_position = broker.get_position(trade_symbol)
         current_unit = _position_unit(current_position)
         signal = strategy.generate_signal(bars, current_position=current_unit)
         last_price = bars[-1].close
@@ -123,6 +151,7 @@ async def run_live(
             candidate_target = clamp_target_position(
                 raw_target, settings.max_abs_position
             )
+            candidate_target = _whole_share_target(candidate_target)
             is_entry_or_flip = (
                 signal.target_position != 0.0 and signal.target_position != current_unit
             )
@@ -146,10 +175,14 @@ async def run_live(
                 target_position = candidate_target
         delta = target_position - current_position
 
-        order_id = "dry-run"
+        order_id = "dry-run" if dry_run else "no-order"
         if not dry_run and delta != 0:
             order_id = await broker.place_market_order(
-                symbol=symbol, quantity=delta, price_hint=last_price
+                symbol=trade_symbol,
+                quantity=delta,
+                price_hint=last_price,
+                contract_id=settings.ib_contract_id,
+                exchange=settings.ib_exchange,
             )
 
         return LiveRunResult(
@@ -161,7 +194,7 @@ async def run_live(
             broker=settings.broker,
             data_dir=str(settings.data_dir),
             dry_run=dry_run,
-            symbol=symbol,
+            symbol=trade_symbol,
             signal_action=signal.action,
             target_position=round(target_position, 4),
             delta=round(delta, 4),
